@@ -97,10 +97,6 @@
   <div id="counter" class="counter">0 / 10000文字</div>
   <div id="warnBox" class="note" style="color:var(--warn)"></div>
 
-  <div class="seg" style="margin-top:8px">
-    <button id="modeA" class="sel">漢字OK（Unicode）</button>
-    <button id="modeB">ローマ字（ひらがなのみ）</button>
-  </div>
 
   <div class="row" style="margin-top:8px">
     <label><input id="clearAfter" type="checkbox" checked> 送信後に入力欄を空にする</label>
@@ -114,42 +110,6 @@
   <div id="progressBox" class="hidden" style="margin-top:10px">
     <progress id="progress" value="0" max="1"></progress>
     <div id="progressText" class="counter">0 / 0文字</div>
-  </div>
-</div>
-
-<!-- ===== キー操作 ===== -->
-<div class="card">
-  <div class="grid3">
-    <button data-key="enter">Enter</button>
-    <button data-key="bs">⌫ BS</button>
-    <button data-key="tab">Tab</button>
-    <button data-key="ime_on">IME ON<br><small>(あ)</small></button>
-    <button data-key="ime_off">IME OFF<br><small>(A)</small></button>
-    <button data-key="hankaku">半角/全角</button>
-    <button data-key="numlock">NumLock</button>
-    <button data-key="capslock">CapsLock</button>
-    <button data-key="insert">Insert</button>
-    <button data-key="esc">Esc</button>
-    <button data-key="del">Delete</button>
-    <button data-key="space">Space</button>
-  </div>
-  <div class="row" style="margin-top:10px; gap:6px">
-    <span class="lamp" id="lampNum">NumLock</span>
-    <span class="lamp" id="lampCaps">CapsLock</span>
-    <span class="lamp" id="lampScroll">ScrollLock</span>
-  </div>
-  <p class="note">ランプはPCから届いた実際の状態です。IMEとInsertの状態はPCから読み取れないため表示しません。</p>
-</div>
-
-<!-- ===== ジグラー ===== -->
-<div class="card">
-  <div class="row">
-    <span class="grow"><b>スリープ防止（ジグラー）</b><br><span class="note">F15キーを定期的に押します（画面には何も入力されません）</span></span>
-    <button id="btnJiggler" style="min-width:90px">OFF</button>
-  </div>
-  <div style="margin-top:8px">
-    <label>間隔：<span id="jigVal">60</span>秒</label>
-    <input id="jigInterval" type="range" min="30" max="300" step="10" value="60" style="width:100%">
   </div>
 </div>
 
@@ -173,6 +133,15 @@
         <button data-layout="us">英語（US）</button>
       </div>
     </div>
+    <div style="border-top:1px solid var(--line); margin-top:14px"></div>
+  <div class="row" style="margin-top:14px">
+    <span class="grow"><b>スリープ防止</b><br><span class="note">F15キーを定期的に押します（画面には何も入力されません）</span></span>
+    <button id="btnJiggler" style="min-width:90px">OFF</button>
+  </div>
+  <div style="margin-top:8px">
+    <label>間隔：<span id="jigVal">60</span>秒</label>
+    <input id="jigInterval" type="range" min="30" max="300" step="10" value="60" style="width:100%">
+  </div>
   </details>
 </div>
 
@@ -270,11 +239,7 @@ function refreshButtons() {
   $('demoBanner').classList.toggle('hidden', !st.demo);
 }
 
-function setLamps(bits) {
-  $('lampNum').classList.toggle('lit', !!(bits & 1));
-  $('lampCaps').classList.toggle('lit', !!(bits & 2));
-  $('lampScroll').classList.toggle('lit', !!(bits & 4));
-}
+function setLamps(bits) { /* ランプ表示は無し */ }
 
 function setJiggler(on, sec) {
   st.jigOn = on;
@@ -299,8 +264,7 @@ function countWarn() {
   const warns = [];
   const over = chars > MAX_CHARS || bytes > MAX_BYTES;
   if (over) warns.push(`長すぎます（最大${MAX_CHARS}文字）。分けて送ってください。`);
-  if (st.mode === 'A' && /[\u{10000}-\u{10FFFF}]/u.test(s)) warns.push('絵文字など一部の文字はPCに送れないため飛ばされます。');
-  if (st.mode === 'B' && /[一-鿿㐀-䶿]/.test(s)) warns.push('ローマ字モードでは漢字は送れません。「漢字OK」に切り替えてください。');
+  if (/[\u{10000}-\u{10FFFF}]/u.test(s)) warns.push('絵文字など一部の文字はPCに送れないため飛ばされます。');
   return { chars, bytes, over, warns };
 }
 
@@ -464,7 +428,7 @@ async function sendText() {
   const bytes = enc.encode(text);
   showProgress(0, r.chars);
   try {
-    await writeRaw(concat([0x10, st.mode === 'A' ? 0 : 1, LAYOUT[st.layout], SPEED[st.speed]], u32(bytes.length)));
+    await writeRaw(concat([0x10, 0, LAYOUT[st.layout], SPEED[st.speed]], u32(bytes.length)));
     let seq = 0;
     for (let i = 0; i < bytes.length; i += CHUNK) {
       if (st.stopRequested) throw new Error('停止しました');
@@ -559,14 +523,11 @@ function init() {
   // 保存してある設定を戻す
   const savedPass = load('pass', '');
   if (savedPass) { $('pass').value = savedPass; $('rememberPass').checked = true; }
-  st.mode = load('mode', 'A');
   st.speed = load('speed', 'normal');
   st.layout = load('layout', 'jis');
   const jig = load('jig', 60);
   $('jigInterval').value = jig; $('jigVal').textContent = jig;
   $('clearAfter').checked = load('clear', true);
-  $('modeA').classList.toggle('sel', st.mode === 'A');
-  $('modeB').classList.toggle('sel', st.mode === 'B');
   selectSeg($('speedSeg'), 'speed', st.speed);
   selectSeg($('layoutSeg'), 'layout', st.layout);
 
@@ -579,8 +540,6 @@ function init() {
   $('rememberPass').onchange = (e) => { if (!e.target.checked) save('pass', ''); };
   $('clearAfter').onchange = (e) => save('clear', e.target.checked);
 
-  $('modeA').onclick = () => { st.mode = 'A'; save('mode', 'A'); $('modeA').classList.add('sel'); $('modeB').classList.remove('sel'); updateCounter(); };
-  $('modeB').onclick = () => { st.mode = 'B'; save('mode', 'B'); $('modeB').classList.add('sel'); $('modeA').classList.remove('sel'); updateCounter(); };
 
   $('speedSeg').querySelectorAll('button').forEach(b => b.onclick = () => { st.speed = b.dataset.speed; save('speed', st.speed); selectSeg($('speedSeg'), 'speed', st.speed); });
   $('layoutSeg').querySelectorAll('button').forEach(b => b.onclick = () => { st.layout = b.dataset.layout; save('layout', st.layout); selectSeg($('layoutSeg'), 'layout', st.layout); });
