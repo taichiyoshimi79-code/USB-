@@ -34,6 +34,7 @@
 // ===================== ここは自分用に変える =====================
 #define PASSPHRASE   "change-me"     // 合言葉（19バイトまで。スマホで入れるものと同じにする）
 #define DEVICE_NAME  "PhoneKB"       // スマホの接続画面に出る名前
+#define AUTO_IME     true            // 英数字の前後で IME を自動で切り替える（PCのIMEは普段「あ」のままでOK）
 // ================================================================
 
 // ===== 固定UUID（web/index.html と同じ値） =====
@@ -274,6 +275,7 @@ void typeAll() {
     delay(50);
   }
 
+  bool inAscii = false;   // いま IME OFF にして英数字を打っている途中か
   uint32_t i = 0;
   while (i < textLen) {
     if (stopRequested || !bleConnected) break;
@@ -282,6 +284,13 @@ void typeAll() {
 
     if (typeMode == 0) {
       // ----- Unicode16進モード -----
+      // PCのIMEは普段「あ（日本語）」のままでよい。
+      //  ・日本語の文字は Unicode16進で打つので、IMEの状態に関係なく入る
+      //  ・英数字・記号の連続の前では「無変換（IME OFF）」、後では「変換（IME ON）」を自動で押す
+      if (AUTO_IME) {
+        if (cp < 0x80 && !inAscii) { tapRaw(K_MUHENKAN); delay(30); inAscii = true; }
+        else if (cp >= 0x80 && inAscii) { tapRaw(K_HENKAN); delay(30); inAscii = false; }
+      }
       if (cp < 0x80) {
         if (!typeAscii((char)cp)) Serial.printf("[打鍵] 打てない文字 0x%02X\n", (unsigned)cp);
       } else if (cp <= 0xFFFF) {
@@ -312,6 +321,7 @@ void typeAll() {
     if (millis() - lastNotify > 200) { notifyProgress(done, total); lastNotify = millis(); }
   }
   if (typeMode == 1) confirmKana();
+  if (typeMode == 0 && AUTO_IME && inAscii) { tapRaw(K_HENKAN); delay(30); }   // IME を日本語入力に戻す
   if (numWasOff) tapRaw(K_NUMLOCK);   // NumLock を元に戻す
   Keyboard.releaseAll();
 
