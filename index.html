@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>スマホキーボード</title>
+<style>
+  /* ===== 色の定義（ライト／ダーク両対応） ===== */
+  :root {
+    --bg: #f4f5f7; --card: #ffffff; --text: #1d1f23; --sub: #6b7078;
+    --line: #dcdfe4; --accent: #2f6fed; --accent-text: #ffffff;
+    --ok: #1f9d55; --warn: #d97706; --ng: #d93636; --btn: #eef0f3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121417; --card: #1c1f24; --text: #eceef1; --sub: #9aa0a8;
+      --line: #2e333a; --accent: #4c86ff; --accent-text: #ffffff;
+      --ok: #34c06e; --warn: #f0a23a; --ng: #ff5c5c; --btn: #262a31;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Hiragino Sans", "Helvetica Neue", sans-serif;
+    font-size: 18px; line-height: 1.5;
+    padding: env(safe-area-inset-top) 12px calc(env(safe-area-inset-bottom) + 24px);
+  }
+  h1 { font-size: 22px; margin: 14px 4px 10px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .grow { flex: 1; }
+  button {
+    font-size: 18px; font-weight: 600; border: 1px solid var(--line); border-radius: 12px;
+    background: var(--btn); color: var(--text); padding: 12px 10px; min-height: 52px;
+    -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+  }
+  button:active { transform: scale(0.97); }
+  button:disabled { opacity: 0.4; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button.danger { background: var(--ng); color: #fff; border-color: var(--ng); }
+  button.on { background: var(--ok); color: #fff; border-color: var(--ok); }
+  input[type=text], input[type=password], textarea, select {
+    font-size: 18px; color: var(--text); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 10px; padding: 10px; width: 100%;
+  }
+  textarea { min-height: 180px; resize: vertical; font-size: 20px; }
+  label { font-size: 16px; color: var(--sub); }
+  .status { font-weight: 700; }
+  .status.ok { color: var(--ok); } .status.ng { color: var(--ng); } .status.warn { color: var(--warn); }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .lamp { display: inline-block; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); font-size: 15px; color: var(--sub); }
+  .lamp.lit { background: var(--ok); color: #fff; border-color: var(--ok); }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .seg button { flex: 1; border: none; border-radius: 0; min-height: 46px; font-size: 16px; }
+  .seg button.sel { background: var(--accent); color: var(--accent-text); }
+  .counter { font-size: 15px; color: var(--sub); text-align: right; }
+  .counter.over { color: var(--ng); font-weight: 700; }
+  progress { width: 100%; height: 14px; }
+  .note { font-size: 14px; color: var(--sub); }
+  .log { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--sub); max-height: 140px; overflow-y: auto; white-space: pre-wrap; }
+  details summary { font-weight: 700; cursor: pointer; padding: 4px 0; }
+  .hidden { display: none !important; }
+  .banner { background: var(--warn); color: #fff; border-radius: 10px; padding: 8px 12px; font-weight: 700; margin-bottom: 10px; }
+</style>
+</head>
+<body>
+
+<h1>📱→⌨️ スマホキーボード</h1>
+
+<div id="demoBanner" class="banner hidden">デモモード中（ドングル無しで動作確認しています）</div>
+
+<!-- ===== 接続 ===== -->
+<div class="card">
+  <div class="row">
+    <span class="grow">状態：<span id="connStatus" class="status ng">未接続</span></span>
+  </div>
+  <div class="row" style="margin-top:10px">
+    <input id="pass" type="password" class="grow" placeholder="合言葉" autocomplete="off">
+  </div>
+  <div class="row" style="margin-top:6px">
+    <label><input id="rememberPass" type="checkbox"> 合言葉をこのスマホに記憶する</label>
+  </div>
+  <div class="grid2" style="margin-top:10px">
+    <button id="btnConnect" class="primary">接続</button>
+    <button id="btnDisconnect" disabled>切断</button>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <button id="btnDemo" class="grow">デモモード（ドングル無し）</button>
+  </div>
+  <p id="noBleNote" class="note hidden">このブラウザはBluetoothに対応していません。iPhoneでは「Bluefy」アプリで開いてください。デモモードは使えます。</p>
+</div>
+
+<!-- ===== 入力・送信 ===== -->
+<div class="card">
+  <textarea id="text" placeholder="ここに入力（フリック・音声入力・貼り付けOK）"></textarea>
+  <div id="counter" class="counter">0 / 10000文字</div>
+  <div id="warnBox" class="note" style="color:var(--warn)"></div>
+
+  <div class="seg" style="margin-top:8px">
+    <button id="modeA" class="sel">漢字OK（Unicode）</button>
+    <button id="modeB">ローマ字（ひらがなのみ）</button>
+  </div>
+
+  <div class="row" style="margin-top:8px">
+    <label><input id="clearAfter" type="checkbox" checked> 送信後に入力欄を空にする</label>
+  </div>
+
+  <div class="grid2" style="margin-top:10px">
+    <button id="btnSend" class="primary" disabled>送信</button>
+    <button id="btnStop" class="danger" disabled>停止</button>
+  </div>
+
+  <div id="progressBox" class="hidden" style="margin-top:10px">
+    <progress id="progress" value="0" max="1"></progress>
+    <div id="progressText" class="counter">0 / 0文字</div>
+  </div>
+</div>
+
+<!-- ===== キー操作 ===== -->
+<div class="card">
+  <div class="grid3">
+    <button data-key="enter">Enter</button>
+    <button data-key="bs">⌫ BS</button>
+    <button data-key="tab">Tab</button>
+    <button data-key="ime_on">IME ON<br><small>(あ)</small></button>
+    <button data-key="ime_off">IME OFF<br><small>(A)</small></button>
+    <button data-key="hankaku">半角/全角</button>
+    <button data-key="numlock">NumLock</button>
+    <button data-key="capslock">CapsLock</button>
+    <button data-key="insert">Insert</button>
+    <button data-key="esc">Esc</button>
+    <button data-key="del">Delete</button>
+    <button data-key="space">Space</button>
+  </div>
+  <div class="row" style="margin-top:10px; gap:6px">
+    <span class="lamp" id="lampNum">NumLock</span>
+    <span class="lamp" id="lampCaps">CapsLock</span>
+    <span class="lamp" id="lampScroll">ScrollLock</span>
+  </div>
+  <p class="note">ランプはPCから届いた実際の状態です。IMEとInsertの状態はPCから読み取れないため表示しません。</p>
+</div>
+
+<!-- ===== ジグラー ===== -->
+<div class="card">
+  <div class="row">
+    <span class="grow"><b>スリープ防止（ジグラー）</b><br><span class="note">F15キーを定期的に押します（画面には何も入力されません）</span></span>
+    <button id="btnJiggler" style="min-width:90px">OFF</button>
+  </div>
+  <div style="margin-top:8px">
+    <label>間隔：<span id="jigVal">60</span>秒</label>
+    <input id="jigInterval" type="range" min="30" max="300" step="10" value="60" style="width:100%">
+  </div>
+</div>
+
+<!-- ===== 設定 ===== -->
+<div class="card">
+  <details>
+    <summary>設定</summary>
+    <div style="margin-top:10px">
+      <label>入力速度</label>
+      <div class="seg" id="speedSeg">
+        <button data-speed="slow">ゆっくり</button>
+        <button data-speed="normal" class="sel">ふつう</button>
+        <button data-speed="fast">速い</button>
+      </div>
+      <p class="note">文字が抜ける・化ける時は「ゆっくり」にしてください。</p>
+    </div>
+    <div style="margin-top:10px">
+      <label>PCのキーボード配列（英数字・記号用）</label>
+      <div class="seg" id="layoutSeg">
+        <button data-layout="jis" class="sel">日本語（JIS）</button>
+        <button data-layout="us">英語（US）</button>
+      </div>
+    </div>
+  </details>
+</div>
+
+<!-- ===== ログ ===== -->
+<div class="card">
+  <details>
+    <summary>通信ログ</summary>
+    <div id="log" class="log"></div>
+  </details>
+</div>
+
+<script>
+'use strict';
+/*
+ * スマホ → ESP32(AtomS3U) → PC キーボード 送信アプリ
+ * ライブラリ無し・1ファイル。Bluefy（iPhone）で HTTPS 上から開く前提。
+ *
+ * 【通信の約束ごと】ファームウェア側と必ず一致させること
+ *  スマホ→ドングル（WRITE 特性）: 先頭1バイトが命令、1回最大20バイト
+ *   0x01 合言葉        : [0x01][合言葉UTF-8 最大19バイト]
+ *   0x10 送信開始      : [0x10][モード][配列][速度][総バイト数 uint32 LE]
+ *   0x11 本文の断片    : [0x11][通し番号 uint16 LE][本文 最大17バイト]
+ *   0x12 送信終わり    : [0x12]            ← 終端マーカー。ここで打鍵開始
+ *   0x13 停止          : [0x13]
+ *   0x20 キー1つ       : [0x20][キー番号][配列 0=JIS 1=US]
+ *   0x30 ジグラー      : [0x30][ON=1/OFF=0][間隔秒 uint16 LE]
+ *   0x40 状態問い合わせ : [0x40]
+ *  ドングル→スマホ（NOTIFY 特性）
+ *   0x81 合言葉の結果  : [0x81][1=OK / 0=NG]
+ *   0x82 断片の受領    : [0x82][通し番号 uint16 LE]
+ *   0x83 打鍵の進み具合: [0x83][打った文字数 uint16 LE][全文字数 uint16 LE]
+ *   0x84 打鍵完了      : [0x84]
+ *   0x85 停止しました  : [0x85]
+ *   0x86 ロック状態    : [0x86][bit0=Num bit1=Caps bit2=Scroll]
+ *   0x87 ジグラー状態  : [0x87][ON/OFF][間隔秒 uint16 LE]
+ *   0x88 エラー        : [0x88][番号] 1=未認証 2=入力中 3=容量オーバー 4=順番ずれ
+ */
+
+// ===== 固定UUID（ファームウェアと同じ値） =====
+const SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dc4b10';
+const WRITE_UUID   = '6e400002-b5a3-f393-e0a9-e50e24dc4b10';
+const NOTIFY_UUID  = '6e400003-b5a3-f393-e0a9-e50e24dc4b10';
+
+const MAX_CHARS = 10000;          // 送れる最大文字数
+const MAX_BYTES = 32000;          // ドングル側の受け取り用メモリ
+const CHUNK = 17;                 // 1断片に入れる本文バイト数（20 - 3）
+const ACK_TIMEOUT_MS = 3000;
+
+const KEY_CODES = { enter:1, bs:2, tab:3, ime_on:4, ime_off:5, hankaku:6,
+  numlock:7, capslock:8, insert:9, esc:10, del:11, space:12 };
+const SPEED = { slow:0, normal:1, fast:2 };
+const LAYOUT = { jis:0, us:1 };
+
+// ===== 状態 =====
+const st = {
+  device: null, writeChar: null, connected: false, authed: false, demo: false,
+  mode: 'A', speed: 'normal', layout: 'jis',
+  sending: false, typing: false, stopRequested: false,
+  jigOn: false, jigInterval: 60,
+  ackWaiters: new Map(), userDisconnect: false, reconnectTries: 0,
+};
+
+const $ = (id) => document.getElementById(id);
+const enc = new TextEncoder();
+const dec = new TextDecoder();
+
+// ===== ログ =====
+function log(msg) {
+  const t = new Date().toLocaleTimeString('ja-JP');
+  const el = $('log');
+  el.textContent = `${t} ${msg}\n` + el.textContent.slice(0, 5000);
+}
+
+// ===== 保存（このスマホのブラウザ内だけ） =====
+function save(k, v) { try { localStorage.setItem('kb_' + k, JSON.stringify(v)); } catch (e) {} }
+function load(k, d) { try { const v = localStorage.getItem('kb_' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }
+
+// ===== 画面更新 =====
+function setStatus(text, cls) {
+  const el = $('connStatus');
+  el.textContent = text;
+  el.className = 'status ' + cls;
+}
+
+function refreshButtons() {
+  const ready = (st.connected && st.authed) || st.demo;
+  const busy = st.sending || st.typing;
+  $('btnSend').disabled = !ready || busy || countWarn().over;
+  $('btnStop').disabled = !busy;
+  $('btnConnect').disabled = st.connected || st.demo;
+  $('btnDisconnect').disabled = !st.connected && !st.demo;
+  document.querySelectorAll('[data-key]').forEach(b => b.disabled = !ready || busy);
+  $('btnJiggler').disabled = !ready;
+  $('btnDemo').textContent = st.demo ? 'デモモードを終わる' : 'デモモード（ドングル無し）';
+  $('demoBanner').classList.toggle('hidden', !st.demo);
+}
+
+function setLamps(bits) {
+  $('lampNum').classList.toggle('lit', !!(bits & 1));
+  $('lampCaps').classList.toggle('lit', !!(bits & 2));
+  $('lampScroll').classList.toggle('lit', !!(bits & 4));
+}
+
+function setJiggler(on, sec) {
+  st.jigOn = on;
+  if (sec) { st.jigInterval = sec; $('jigInterval').value = sec; $('jigVal').textContent = sec; }
+  const b = $('btnJiggler');
+  b.textContent = on ? 'ON' : 'OFF';
+  b.classList.toggle('on', on);
+}
+
+function showProgress(done, total) {
+  $('progressBox').classList.remove('hidden');
+  $('progress').max = Math.max(total, 1);
+  $('progress').value = done;
+  $('progressText').textContent = `${done} / ${total}文字`;
+}
+
+// ===== 文字数チェックと注意 =====
+function countWarn() {
+  const s = $('text').value;
+  const chars = [...s].length;
+  const bytes = enc.encode(s).length;
+  const warns = [];
+  const over = chars > MAX_CHARS || bytes > MAX_BYTES;
+  if (over) warns.push(`長すぎます（最大${MAX_CHARS}文字）。分けて送ってください。`);
+  if (st.mode === 'A' && /[\u{10000}-\u{10FFFF}]/u.test(s)) warns.push('絵文字など一部の文字はPCに送れないため飛ばされます。');
+  if (st.mode === 'B' && /[一-鿿㐀-䶿]/.test(s)) warns.push('ローマ字モードでは漢字は送れません。「漢字OK」に切り替えてください。');
+  return { chars, bytes, over, warns };
+}
+
+function updateCounter() {
+  const r = countWarn();
+  const c = $('counter');
+  c.textContent = `${r.chars} / ${MAX_CHARS}文字`;
+  c.classList.toggle('over', r.over);
+  $('warnBox').textContent = r.warns.join(' ');
+  refreshButtons();
+}
+
+// ===== Bluetooth 接続 =====
+async function connect() {
+  if (!navigator.bluetooth) { alert('このブラウザはBluetoothに使えません。Bluefyで開いてください。'); return; }
+  const pass = $('pass').value;
+  if (!pass) { alert('合言葉を入れてください'); return; }
+  try {
+    setStatus('探しています…', 'warn');
+    st.userDisconnect = false;
+    if (!st.device) {
+      st.device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE_UUID] }] });
+      st.device.addEventListener('gattserverdisconnected', onDisconnected);
+    }
+    await openGatt();
+  } catch (e) {
+    log('接続失敗: ' + e.message);
+    setStatus('未接続', 'ng');
+    refreshButtons();
+  }
+}
+
+async function openGatt() {
+  setStatus('接続中…', 'warn');
+  const server = await st.device.gatt.connect();
+  const svc = await server.getPrimaryService(SERVICE_UUID);
+  st.writeChar = await svc.getCharacteristic(WRITE_UUID);
+  const notifyChar = await svc.getCharacteristic(NOTIFY_UUID);
+  await notifyChar.startNotifications();
+  // 同じ関数を渡すので、再接続しても二重登録にならない
+  notifyChar.addEventListener('characteristicvaluechanged', onNotifyEvent);
+  st.connected = true;
+  st.reconnectTries = 0;
+  log('接続しました: ' + (st.device.name || '名前なし'));
+  // 合言葉を送る
+  const p = enc.encode($('pass').value).slice(0, 19);
+  setStatus('合言葉を確認中…', 'warn');
+  await writeRaw(concat([0x01], p));
+  refreshButtons();
+}
+
+function onDisconnected() {
+  st.connected = false; st.authed = false; st.writeChar = null;
+  st.sending = false; st.typing = false;
+  rejectAllAcks('切断されました');
+  log('切断されました');
+  refreshButtons();
+  if (st.userDisconnect) { setStatus('未接続', 'ng'); return; }
+  // 自動で再接続（最大5回）
+  if (st.reconnectTries < 5) {
+    st.reconnectTries++;
+    setStatus(`再接続中…（${st.reconnectTries}回目）`, 'warn');
+    setTimeout(() => openGatt().catch(e => { log('再接続失敗: ' + e.message); onDisconnected(); }), 1500 * st.reconnectTries);
+  } else {
+    setStatus('未接続（もう一度「接続」を押してください）', 'ng');
+  }
+}
+
+function disconnect() {
+  if (st.demo) { st.demo = false; demoStopTyping(); setStatus('未接続', 'ng'); refreshButtons(); return; }
+  st.userDisconnect = true;
+  if (st.device && st.device.gatt.connected) st.device.gatt.disconnect();
+}
+
+// ===== 送受信の下回り =====
+function concat(...parts) {
+  const arrs = parts.map(p => p instanceof Uint8Array ? p : Uint8Array.from(p));
+  const out = new Uint8Array(arrs.reduce((n, a) => n + a.length, 0));
+  let o = 0; for (const a of arrs) { out.set(a, o); o += a.length; }
+  return out;
+}
+const u16 = (n) => [n & 0xff, (n >> 8) & 0xff];
+const u32 = (n) => [n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >>> 24) & 0xff];
+
+async function writeRaw(bytes) {
+  if (st.demo) return demoReceive(bytes);
+  if (!st.writeChar) throw new Error('未接続');
+  if (st.writeChar.writeValueWithResponse) await st.writeChar.writeValueWithResponse(bytes);
+  else await st.writeChar.writeValue(bytes);
+}
+
+function waitAck(seq) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { st.ackWaiters.delete(seq); reject(new Error('受領の返事がありません')); }, ACK_TIMEOUT_MS);
+    st.ackWaiters.set(seq, { resolve, reject, timer });
+  });
+}
+function rejectAllAcks(msg) {
+  for (const [, w] of st.ackWaiters) { clearTimeout(w.timer); w.reject(new Error(msg)); }
+  st.ackWaiters.clear();
+}
+
+// ===== ドングルからの通知 =====
+function onNotifyEvent(ev) {
+  const v = ev.target.value;
+  onNotify(new Uint8Array(v.buffer, v.byteOffset, v.byteLength));
+}
+function onNotify(b) {
+  const r16 = (i) => b[i] | (b[i + 1] << 8);
+  switch (b[0]) {
+    case 0x81:
+      st.authed = b[1] === 1;
+      if (st.authed) {
+        setStatus(st.demo ? 'デモ接続中' : '接続中', 'ok');
+        if ($('rememberPass').checked) save('pass', $('pass').value);
+        writeRaw(Uint8Array.from([0x40])).catch(() => {});
+      } else {
+        setStatus('合言葉が違います', 'ng');
+        alert('合言葉が違います');
+      }
+      break;
+    case 0x82: {
+      const w = st.ackWaiters.get(r16(1));
+      if (w) { clearTimeout(w.timer); st.ackWaiters.delete(r16(1)); w.resolve(); }
+      break;
+    }
+    case 0x83:
+      st.typing = true;
+      showProgress(r16(1), r16(3));
+      break;
+    case 0x84:
+      st.typing = false;
+      log('入力が終わりました');
+      $('progressText').textContent += ' 完了';
+      break;
+    case 0x85:
+      st.typing = false; st.sending = false;
+      log('停止しました');
+      $('progressText').textContent += ' 停止';
+      break;
+    case 0x86: setLamps(b[1]); break;
+    case 0x87: setJiggler(b[1] === 1, r16(2)); break;
+    case 0x88: {
+      const msg = { 1: '合言葉の確認が済んでいません', 2: 'まだ入力中です', 3: '長すぎて受け取れません', 4: '受け取り順がずれました。もう一度送ってください' }[b[1]] || 'エラー ' + b[1];
+      log('ドングルのエラー: ' + msg);
+      alert(msg);
+      rejectAllAcks(msg);
+      break;
+    }
+  }
+  refreshButtons();
+}
+
+// ===== 本文の送信 =====
+async function sendText() {
+  const r = countWarn();
+  const text = $('text').value;
+  if (!text || r.over) return;
+  st.sending = true; st.stopRequested = false;
+  refreshButtons();
+  const bytes = enc.encode(text);
+  showProgress(0, r.chars);
+  try {
+    await writeRaw(concat([0x10, st.mode === 'A' ? 0 : 1, LAYOUT[st.layout], SPEED[st.speed]], u32(bytes.length)));
+    let seq = 0;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      if (st.stopRequested) throw new Error('停止しました');
+      const part = bytes.slice(i, i + CHUNK);
+      const ack = waitAck(seq);
+      await writeRaw(concat([0x11], u16(seq), part));
+      await ack;
+      seq = (seq + 1) & 0xffff;
+      $('progressText').textContent = `ドングルへ転送中 ${Math.round((i + part.length) / bytes.length * 100)}%`;
+    }
+    await writeRaw(Uint8Array.from([0x12]));
+    st.typing = true;
+    log(`送信しました（${r.chars}文字・${bytes.length}バイト）`);
+    if ($('clearAfter').checked) { $('text').value = ''; updateCounter(); }
+  } catch (e) {
+    log('送信を中断: ' + e.message);
+    if (!st.stopRequested) alert('送信できませんでした：' + e.message);
+  } finally {
+    st.sending = false;
+    refreshButtons();
+  }
+}
+
+async function stopTyping() {
+  st.stopRequested = true;
+  try { await writeRaw(Uint8Array.from([0x13])); } catch (e) { log('停止の送信に失敗: ' + e.message); }
+}
+
+async function sendKey(name) {
+  try { await writeRaw(Uint8Array.from([0x20, KEY_CODES[name], LAYOUT[st.layout]])); log('キー: ' + name); }
+  catch (e) { log('キー送信失敗: ' + e.message); }
+}
+
+async function sendJiggler(on) {
+  const sec = parseInt($('jigInterval').value, 10);
+  try { await writeRaw(concat([0x30, on ? 1 : 0], u16(sec))); save('jig', sec); }
+  catch (e) { log('ジグラー設定失敗: ' + e.message); }
+}
+
+// ===== デモモード（ドングルの代わりに画面内で真似をする） =====
+const demo = { buf: [], total: 0, timer: null, locks: 1, jig: false, jigSec: 60 };
+
+function demoReceive(b) {
+  const reply = (arr) => setTimeout(() => onNotify(Uint8Array.from(arr)), 30);
+  switch (b[0]) {
+    case 0x01: reply([0x81, 1]); break;
+    case 0x10: demo.buf = []; demo.total = b[4] | (b[5] << 8) | (b[6] << 16) | (b[7] << 24); break;
+    case 0x11: demo.buf.push(...b.slice(3)); reply([0x82, b[1], b[2]]); break;
+    case 0x12: demoStartTyping(); break;
+    case 0x13: demoStopTyping(); reply([0x85]); break;
+    case 0x20:
+      if (b[1] === 7) demo.locks ^= 1;
+      if (b[1] === 8) demo.locks ^= 2;
+      reply([0x86, demo.locks]);
+      break;
+    case 0x30: demo.jig = b[1] === 1; demo.jigSec = b[2] | (b[3] << 8); reply([0x87, demo.jig ? 1 : 0, b[2], b[3]]); break;
+    case 0x40: reply([0x86, demo.locks]); reply([0x87, demo.jig ? 1 : 0, ...u16(demo.jigSec)]); break;
+  }
+  return Promise.resolve();
+}
+
+function demoStartTyping() {
+  const chars = [...dec.decode(Uint8Array.from(demo.buf))];
+  const delay = { slow: 120, normal: 60, fast: 30 }[st.speed];
+  let i = 0;
+  demoStopTyping();
+  log('（デモ）PCに打つ文字: ' + chars.join('').slice(0, 60) + (chars.length > 60 ? '…' : ''));
+  demo.timer = setInterval(() => {
+    i++;
+    onNotify(Uint8Array.from([0x83, ...u16(i), ...u16(chars.length)]));
+    if (i >= chars.length) { demoStopTyping(); onNotify(Uint8Array.from([0x84])); }
+  }, delay);
+}
+function demoStopTyping() { if (demo.timer) { clearInterval(demo.timer); demo.timer = null; } }
+
+function toggleDemo() {
+  if (st.demo) { disconnect(); return; }
+  st.demo = true;
+  log('デモモード開始');
+  writeRaw(Uint8Array.from([0x01]));
+  refreshButtons();
+}
+
+// ===== 画面のボタンをつなぐ =====
+function selectSeg(segEl, attr, value) {
+  segEl.querySelectorAll('button').forEach(b => b.classList.toggle('sel', b.dataset[attr] === value));
+}
+
+function init() {
+  if (!navigator.bluetooth) $('noBleNote').classList.remove('hidden');
+
+  // 保存してある設定を戻す
+  const savedPass = load('pass', '');
+  if (savedPass) { $('pass').value = savedPass; $('rememberPass').checked = true; }
+  st.mode = load('mode', 'A');
+  st.speed = load('speed', 'normal');
+  st.layout = load('layout', 'jis');
+  const jig = load('jig', 60);
+  $('jigInterval').value = jig; $('jigVal').textContent = jig;
+  $('clearAfter').checked = load('clear', true);
+  $('modeA').classList.toggle('sel', st.mode === 'A');
+  $('modeB').classList.toggle('sel', st.mode === 'B');
+  selectSeg($('speedSeg'), 'speed', st.speed);
+  selectSeg($('layoutSeg'), 'layout', st.layout);
+
+  $('btnConnect').onclick = connect;
+  $('btnDisconnect').onclick = disconnect;
+  $('btnDemo').onclick = toggleDemo;
+  $('btnSend').onclick = sendText;
+  $('btnStop').onclick = stopTyping;
+  $('text').addEventListener('input', updateCounter);
+  $('rememberPass').onchange = (e) => { if (!e.target.checked) save('pass', ''); };
+  $('clearAfter').onchange = (e) => save('clear', e.target.checked);
+
+  $('modeA').onclick = () => { st.mode = 'A'; save('mode', 'A'); $('modeA').classList.add('sel'); $('modeB').classList.remove('sel'); updateCounter(); };
+  $('modeB').onclick = () => { st.mode = 'B'; save('mode', 'B'); $('modeB').classList.add('sel'); $('modeA').classList.remove('sel'); updateCounter(); };
+
+  $('speedSeg').querySelectorAll('button').forEach(b => b.onclick = () => { st.speed = b.dataset.speed; save('speed', st.speed); selectSeg($('speedSeg'), 'speed', st.speed); });
+  $('layoutSeg').querySelectorAll('button').forEach(b => b.onclick = () => { st.layout = b.dataset.layout; save('layout', st.layout); selectSeg($('layoutSeg'), 'layout', st.layout); });
+
+  document.querySelectorAll('[data-key]').forEach(b => b.onclick = () => sendKey(b.dataset.key));
+
+  $('btnJiggler').onclick = () => sendJiggler(!st.jigOn);
+  $('jigInterval').oninput = (e) => { $('jigVal').textContent = e.target.value; };
+  $('jigInterval').onchange = () => { if (st.jigOn) sendJiggler(true); else save('jig', parseInt($('jigInterval').value, 10)); };
+
+  updateCounter();
+}
+
+init();
+</script>
+</body>
+</html>
