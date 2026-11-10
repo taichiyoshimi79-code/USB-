@@ -447,7 +447,12 @@ function liveSync() {
   enqueue(async () => {
     await waitIdle();
     if (del) await sendBackspaces(del);
-    if (add) await sendString(add);
+    // ドングルの受け取り上限を超えないよう、大きな貼り付けは8000文字ずつに分けて順に送る
+    const cs = [...add];
+    for (let i = 0; i < cs.length; i += 8000) {
+      await waitIdle();
+      await sendString(cs.slice(i, i + 8000).join(''));
+    }
   });
 }
 
