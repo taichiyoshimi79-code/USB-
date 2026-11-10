@@ -74,7 +74,9 @@
 <div class="card">
   <div class="row">
     <span class="grow">状態：<span id="connStatus" class="status ng">未接続</span></span>
+    <button id="btnDisc2" class="hidden" style="min-height:40px; padding:6px 14px; font-size:16px">切断</button>
   </div>
+  <div id="connForm">
   <div class="row" style="margin-top:10px">
     <input id="pass" type="password" class="grow" placeholder="合言葉" autocomplete="off">
   </div>
@@ -89,6 +91,7 @@
     <button id="btnDemo" class="grow">デモモード（ドングル無し）</button>
   </div>
   <p id="noBleNote" class="note hidden">このブラウザはBluetoothに対応していません。iPhoneでは「Bluefy」アプリで開いてください。デモモードは使えます。</p>
+  </div>
 </div>
 
 <!-- ===== 入力・送信 ===== -->
@@ -237,6 +240,9 @@ function refreshButtons() {
   $('btnJiggler').disabled = !ready;
   $('btnDemo').textContent = st.demo ? 'デモモードを終わる' : 'デモモード（ドングル無し）';
   $('demoBanner').classList.toggle('hidden', !st.demo);
+  const linked = (st.connected && st.authed) || st.demo;
+  $('connForm').classList.toggle('hidden', linked);
+  $('btnDisc2').classList.toggle('hidden', !linked);
 }
 
 function setLamps(bits) { /* ランプ表示は無し */ }
@@ -533,6 +539,7 @@ function init() {
 
   $('btnConnect').onclick = connect;
   $('btnDisconnect').onclick = disconnect;
+  $('btnDisc2').onclick = disconnect;
   $('btnDemo').onclick = toggleDemo;
   $('btnSend').onclick = sendText;
   $('btnStop').onclick = stopTyping;
