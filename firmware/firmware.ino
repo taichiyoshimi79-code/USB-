@@ -241,20 +241,27 @@ const char* kanaToRomaji(uint16_t cp) {
 // 漢字・カタカナ・全角記号など: IME に Unicode の16進4桁を打ち、F5 で文字にして Enter で確定する
 // （PCにソフトもレジストリ設定も要らない。IME は「あ」のままでよい。MS-IME で6/6の文字が正しく入ることを確認済み）
 // コード入力は IME の処理が遅いので、速度の設定に関係なく、ゆっくり（試験で全部成功した間隔）打つ
-#define CODE_KEY_MS    40    // 1キーごとの間隔（押す時間＋離したあと）
-#define CODE_F5_WAIT   300   // F5 のあと、IME が文字にするのを待つ
-#define CODE_START_MS  60    // 最初のキーの前（直前の確定を IME が終えるのを待つ）
-#define CODE_END_MS    100   // Enter のあと
+// 長文で崩れる（長く打つほど IME の処理が遅れる）ため、数文字ごとに休みを入れる。
+// 値は試験用シリアルの「@P」で書き込み直しなしに変えられる。
+uint16_t codeKeyMs    = 40;   // 1キーごとの間隔（押す時間＋離したあと）
+uint16_t codeF5Wait   = 300;  // F5 のあと、IME が文字にするのを待つ
+uint16_t codeStartMs  = 60;   // 最初のキーの前（直前の確定を IME が終えるのを待つ）
+uint16_t codeEndMs    = 100;  // Enter のあと
+uint16_t codePauseEvery = 0;  // この文字数ごとに休む（0=休まない）
+uint16_t codePauseMs  = 0;    // 休む長さ
+uint16_t codeCount = 0;       // 打鍵中に打ったコード入力の文字数
 void tapSlow(uint8_t key, bool shift = false) {
   if (shift) Keyboard.pressRaw(MOD_LSHIFT);
   Keyboard.pressRaw(key);
-  delay(CODE_KEY_MS / 2);
+  delay(codeKeyMs / 2);
   Keyboard.releaseRaw(key);
   if (shift) Keyboard.releaseRaw(MOD_LSHIFT);
-  delay(CODE_KEY_MS / 2);
+  delay(codeKeyMs / 2);
 }
 void typeCodeInput(uint16_t cp) {
-  delay(CODE_START_MS);
+  if (codePauseEvery && codeCount && codeCount % codePauseEvery == 0) delay(codePauseMs);
+  codeCount++;
+  delay(codeStartMs);
   for (int shiftBits = 12; shiftBits >= 0; shiftBits -= 4) {
     uint8_t d = (cp >> shiftBits) & 0xF;
     char c = d < 10 ? ('0' + d) : ('a' + d - 10);
@@ -262,9 +269,9 @@ void typeCodeInput(uint16_t cp) {
     if (asciiToKey(c, layout, k, sh)) tapSlow(k, sh);
   }
   tapSlow(K_F5);
-  delay(CODE_F5_WAIT);     // IME が候補に変えるのを待つ
+  delay(codeF5Wait);     // IME が候補に変えるのを待つ
   tapSlow(K_ENTER);
-  delay(CODE_END_MS);
+  delay(codeEndMs);
 }
 
 // ローマ字モードでは IME の変換途中の文字が長くなりすぎないよう、ときどき Enter で確定する
@@ -304,6 +311,7 @@ void typeAll() {
   uint16_t done = 0;
   uint32_t lastNotify = 0;
   pendingKana = 0;
+  codeCount = 0;
   Serial.printf("[打鍵] 開始 %u文字 モード=%u 配列=%u 速度=%u ime=%u ロック=%u\n", total, typeMode, layout, speed, imeMode, (unsigned)lockBits);
 
   // Unicode モードでは NumLock が ON でないとテンキーの数字が打てない
@@ -434,6 +442,14 @@ void handleTestLine(const String& line) {
   if (line == "@S") {   // 停止（BLE の 0x13 と同じ）
     stopRequested = true;
     Serial.println(typing ? "@SOK typing" : "@SOK idle");
+    return;
+  }
+  if (line.startsWith("@P ")) {   // コード入力の間隔を変える: @P キー間隔 F5後 先頭 末尾 休む文字数 休む長さ（ms）
+    int a, b, c, d, e, f;
+    if (sscanf(line.c_str() + 3, "%d %d %d %d %d %d", &a, &b, &c, &d, &e, &f) == 6) {
+      codeKeyMs = a; codeF5Wait = b; codeStartMs = c; codeEndMs = d; codePauseEvery = e; codePauseMs = f;
+      Serial.println("@POK");
+    } else Serial.println("@PNG format");
     return;
   }
   if (line.startsWith("@K ")) {   // キー1つ（BLE の 0x20 と同じ判定）
