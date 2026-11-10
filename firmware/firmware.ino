@@ -243,10 +243,10 @@ const char* kanaToRomaji(uint16_t cp) {
 // コード入力は IME の処理が遅いので、速度の設定に関係なく、ゆっくり（試験で全部成功した間隔）打つ
 // 長文で崩れる（長く打つほど IME の処理が遅れる）ため、数文字ごとに休みを入れる。
 // 値は試験用シリアルの「@P」で書き込み直しなしに変えられる。
-uint16_t codeKeyMs    = 40;   // 1キーごとの間隔（押す時間＋離したあと）
-uint16_t codeF5Wait   = 300;  // F5 のあと、IME が文字にするのを待つ
-uint16_t codeStartMs  = 60;   // 最初のキーの前（直前の確定を IME が終えるのを待つ）
-uint16_t codeEndMs    = 100;  // Enter のあと
+uint16_t codeKeyMs    = 50;   // 1キーごとの間隔（押す時間＋離したあと）
+uint16_t codeF5Wait   = 400;  // F5 のあと、IME が文字にするのを待つ
+uint16_t codeStartMs  = 80;   // 最初のキーの前（直前の確定を IME が終えるのを待つ）
+uint16_t codeEndMs    = 150;  // Enter のあと
 uint16_t codePauseEvery = 0;  // この文字数ごとに休む（0=休まない）
 uint16_t codePauseMs  = 0;    // 休む長さ
 uint16_t codeCount = 0;       // 打鍵中に打ったコード入力の文字数
