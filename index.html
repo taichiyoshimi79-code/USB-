@@ -374,6 +374,7 @@ function onNotify(b) {
         setStatus(st.demo ? 'デモ接続中' : '接続中', 'ok');
         if ($('rememberPass').checked) save('pass', $('pass').value);
         st.synced = $('text').value;   // 接続前に打った分は送らない
+        focusInput();
         writeRaw(Uint8Array.from([0x40])).catch(() => {});
       } else {
         setStatus('合言葉が違います', 'ng');
@@ -504,10 +505,16 @@ async function stopTyping() {
   try { await writeRaw(Uint8Array.from([0x13])); } catch (e) { log('停止の送信に失敗: ' + e.message); }
 }
 
+function focusInput() {
+  const t = $('text');
+  try { t.focus(); t.setSelectionRange(t.value.length, t.value.length); } catch (e) {}
+}
+
 function clearInput() {
   $('text').value = '';
   st.synced = '';
   updateCounter();
+  focusInput();
 }
 
 async function sendKey(name) {
