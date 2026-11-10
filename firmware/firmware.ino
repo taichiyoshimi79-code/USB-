@@ -105,7 +105,7 @@ volatile uint8_t lockBits = 0;   // bit0=Num bit1=Caps bit2=Scroll
 volatile bool lockChanged = false;
 
 // IME の扱い: 0=何もしない 1=無変換(OFF)/変換(ON)キーで切り替え 2=F10(半角英数変換)で確定
-uint8_t imeMode = AUTO_IME ? 1 : 0;
+uint8_t imeMode = AUTO_IME ? 2 : 0;  // 既定は2(F10確定)。このPCでは無変換でIMEがOFFにならないため
 
 // ===== ジグラー =====
 // スマホがつながっていなくても動く。差した直後から ON（本体ボタンかスマホで OFF にできる）
@@ -264,6 +264,9 @@ uint16_t countChars() {
   return n > 0xFFFF ? 0xFFFF : n;
 }
 
+#if TEST_SERIAL
+void pollSerialTest();
+#endif
 void typeAll() {
   typing = true;
   stopRequested = false;
@@ -289,6 +292,9 @@ void typeAll() {
   };
   uint32_t i = 0;
   while (i < textLen) {
+#if TEST_SERIAL
+    pollSerialTest();   // 打鍵中でも @S（停止）・@K（busy確認）を受け付ける
+#endif
     if (stopRequested || (!bleConnected && !testRun)) break;
     uint32_t cp = nextCodepoint(i);
     if (cp == '\r') { done++; continue; }
@@ -320,7 +326,13 @@ void typeAll() {
         confirmKana();
         tapRaw(K_ENTER);
       } else if (cp < 0x80) {
-        if (imeMode == 2) {
+        if (imeMode == 2 && cp == ' ') {
+          // 英数字の途中のスペースは IME の「変換」になってしまうので、
+          // いったん確定してから Shift+Space（IME ON でも半角スペース）を打つ
+          flushAscii(); confirmKana();
+          delay(40);  // F10+Enter の直後だと IME が Shift+Space を取りこぼすことがある
+          tapRaw(K_SPACE, true);
+        } else if (imeMode == 2) {
           if (!asciiRun) { confirmKana(); asciiRun = true; }
           typeAscii((char)cp);
         } else {
@@ -385,6 +397,17 @@ size_t b64decode(const char* in, uint8_t* out, size_t cap) {
 }
 String testLine;
 void handleTestLine(const String& line) {
+  if (line == "@S") {   // 停止（BLE の 0x13 と同じ）
+    stopRequested = true;
+    Serial.println(typing ? "@SOK typing" : "@SOK idle");
+    return;
+  }
+  if (line.startsWith("@K ")) {   // キー1つ（BLE の 0x20 と同じ判定）
+    if (typing) { Serial.println("@KNG busy"); return; }
+    pendingKeyLayout = 0; pendingKey = line.substring(3).toInt();
+    Serial.println("@KOK");
+    return;
+  }
   if (!line.startsWith("@T ")) return;
   if (typing || startTyping) { Serial.println("@TNG busy"); return; }
   int m, l, sp, ime;
