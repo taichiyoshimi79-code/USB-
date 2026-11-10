@@ -240,15 +240,31 @@ const char* kanaToRomaji(uint16_t cp) {
 
 // 漢字・カタカナ・全角記号など: IME に Unicode の16進4桁を打ち、F5 で文字にして Enter で確定する
 // （PCにソフトもレジストリ設定も要らない。IME は「あ」のままでよい。MS-IME で6/6の文字が正しく入ることを確認済み）
+// コード入力は IME の処理が遅いので、速度の設定に関係なく、ゆっくり（試験で全部成功した間隔）打つ
+#define CODE_KEY_MS    40    // 1キーごとの間隔（押す時間＋離したあと）
+#define CODE_F5_WAIT   300   // F5 のあと、IME が文字にするのを待つ
+#define CODE_START_MS  60    // 最初のキーの前（直前の確定を IME が終えるのを待つ）
+#define CODE_END_MS    100   // Enter のあと
+void tapSlow(uint8_t key, bool shift = false) {
+  if (shift) Keyboard.pressRaw(MOD_LSHIFT);
+  Keyboard.pressRaw(key);
+  delay(CODE_KEY_MS / 2);
+  Keyboard.releaseRaw(key);
+  if (shift) Keyboard.releaseRaw(MOD_LSHIFT);
+  delay(CODE_KEY_MS / 2);
+}
 void typeCodeInput(uint16_t cp) {
+  delay(CODE_START_MS);
   for (int shiftBits = 12; shiftBits >= 0; shiftBits -= 4) {
     uint8_t d = (cp >> shiftBits) & 0xF;
-    typeAscii(d < 10 ? ('0' + d) : ('a' + d - 10));
+    char c = d < 10 ? ('0' + d) : ('a' + d - 10);
+    uint8_t k; bool sh;
+    if (asciiToKey(c, layout, k, sh)) tapSlow(k, sh);
   }
-  tapRaw(K_F5);
-  delay(200);              // IME が候補に変えるのを待つ
-  tapRaw(K_ENTER);
-  delay(100);
+  tapSlow(K_F5);
+  delay(CODE_F5_WAIT);     // IME が候補に変えるのを待つ
+  tapSlow(K_ENTER);
+  delay(CODE_END_MS);
 }
 
 // ローマ字モードでは IME の変換途中の文字が長くなりすぎないよう、ときどき Enter で確定する
