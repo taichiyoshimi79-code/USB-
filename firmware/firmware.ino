@@ -69,6 +69,7 @@
 #define K_MUHENKAN  0x8B          // 無変換（IME OFF に割り当てる）
 #define K_YEN       0x89          // JIS「￥」キー（\ と |）
 #define K_HANKAKU   0x35          // JIS では 半角/全角
+#define K_F5        0x3E          // IME の合成中は「文字コード変換」（16進4桁のUnicodeを文字にする）
 #define K_F10       0x43          // IME の合成中は「半角英数に変換」
 #define MOD_LSHIFT  0xE1
 #define MOD_LALT    0xE2
@@ -237,6 +238,19 @@ const char* kanaToRomaji(uint16_t cp) {
   return nullptr;
 }
 
+// 漢字・カタカナ・全角記号など: IME に Unicode の16進4桁を打ち、F5 で文字にして Enter で確定する
+// （PCにソフトもレジストリ設定も要らない。IME は「あ」のままでよい。MS-IME で6/6の文字が正しく入ることを確認済み）
+void typeCodeInput(uint16_t cp) {
+  for (int shiftBits = 12; shiftBits >= 0; shiftBits -= 4) {
+    uint8_t d = (cp >> shiftBits) & 0xF;
+    typeAscii(d < 10 ? ('0' + d) : ('a' + d - 10));
+  }
+  tapRaw(K_F5);
+  delay(200);              // IME が候補に変えるのを待つ
+  tapRaw(K_ENTER);
+  delay(100);
+}
+
 // ローマ字モードでは IME の変換途中の文字が長くなりすぎないよう、ときどき Enter で確定する
 uint16_t pendingKana = 0;
 void confirmKana() { if (pendingKana) { tapRaw(K_ENTER); pendingKana = 0; } }
@@ -314,7 +328,7 @@ void typeAll() {
       }
     } else {
       // ----- ローマ字モード（IME ON のまま、かなをローマ字で打つ。漢字は打てない）-----
-      const char* r = (cp <= 0xFFFF) ? kanaToRomaji((uint16_t)cp) : nullptr;
+      const char* r = (cp <= 0xFFFF && !(cp >= 0x30A1 && cp <= 0x30FA)) ? kanaToRomaji((uint16_t)cp) : nullptr;
       if (r) {
         flushAscii();
         for (const char* p = r; *p; p++) typeAscii(*p);
@@ -340,8 +354,12 @@ void typeAll() {
           typeAscii((char)cp);
           if (imeMode != 1) pendingKana++;
         }
+      } else if (cp >= 0x80 && cp <= 0xFFFF) {
+        // 漢字・カタカナなど: コード入力で打つ
+        flushAscii(); confirmKana();
+        typeCodeInput((uint16_t)cp);
       } else {
-        Serial.printf("[打鍵] ローマ字にできない文字(U+%X)は飛ばします\n", (unsigned)cp);
+        Serial.printf("[打鍵] 打てない文字(U+%X)は飛ばします\n", (unsigned)cp);
       }
       if (cp >= 0x80 && inAscii) { tapRaw(K_HENKAN); delay(30); inAscii = false; }
     }
