@@ -96,17 +96,13 @@
 
 <!-- ===== 入力・送信 ===== -->
 <div class="card">
-  <textarea id="text" placeholder="ここに入力（フリック・音声入力・貼り付けOK）"></textarea>
+  <textarea id="text" placeholder="ここに入力すると、そのままPCに入ります（フリック・音声入力・貼り付けOK）"></textarea>
   <div id="counter" class="counter">0 / 10000文字</div>
   <div id="warnBox" class="note" style="color:var(--warn)"></div>
 
 
-  <div class="row" style="margin-top:8px">
-    <label><input id="clearAfter" type="checkbox" checked> 送信後に入力欄を空にする</label>
-  </div>
-
   <div class="grid2" style="margin-top:10px">
-    <button id="btnSend" class="primary" disabled>送信</button>
+    <button id="btnClear">入力欄をクリア<br><small>（PCには送りません）</small></button>
     <button id="btnStop" class="danger" disabled>停止</button>
   </div>
 
@@ -202,7 +198,7 @@ const LAYOUT = { jis:0, us:1 };
 const st = {
   device: null, writeChar: null, connected: false, authed: false, demo: false,
   mode: 'A', speed: 'normal', layout: 'jis',
-  sending: false, typing: false, stopRequested: false,
+  sending: false, typing: false, stopRequested: false, synced: '', epoch: 0,
   jigOn: false, jigInterval: 60,
   ackWaiters: new Map(), userDisconnect: false, reconnectTries: 0,
 };
@@ -232,7 +228,6 @@ function setStatus(text, cls) {
 function refreshButtons() {
   const ready = (st.connected && st.authed) || st.demo;
   const busy = st.sending || st.typing;
-  $('btnSend').disabled = !ready || busy || countWarn().over;
   $('btnStop').disabled = !busy;
   $('btnConnect').disabled = st.connected || st.demo;
   $('btnDisconnect').disabled = !st.connected && !st.demo;
@@ -268,7 +263,7 @@ function countWarn() {
   const chars = [...s].length;
   const bytes = enc.encode(s).length;
   const warns = [];
-  const over = chars > MAX_CHARS || bytes > MAX_BYTES;
+  const over = false;
   if (over) warns.push(`長すぎます（最大${MAX_CHARS}文字）。分けて送ってください。`);
   if (/[\u{10000}-\u{10FFFF}]/u.test(s)) warns.push('絵文字など一部の文字はPCに送れないため飛ばされます。');
   return { chars, bytes, over, warns };
@@ -386,6 +381,7 @@ function onNotify(b) {
       if (st.authed) {
         setStatus(st.demo ? 'デモ接続中' : '接続中', 'ok');
         if ($('rememberPass').checked) save('pass', $('pass').value);
+        st.synced = $('text').value;   // 接続前に打った分は送らない
         writeRaw(Uint8Array.from([0x40])).catch(() => {});
       } else {
         setStatus('合言葉が違います', 'ng');
@@ -399,17 +395,17 @@ function onNotify(b) {
     }
     case 0x83:
       st.typing = true;
-      showProgress(r16(1), r16(3));
+      if (r16(3) > 20) showProgress(r16(1), r16(3));
       break;
     case 0x84:
       st.typing = false;
       log('入力が終わりました');
-      $('progressText').textContent += ' 完了';
+      if (!$('progressBox').classList.contains('hidden')) $('progressText').textContent += ' 完了';
       break;
     case 0x85:
       st.typing = false; st.sending = false;
       log('停止しました');
-      $('progressText').textContent += ' 停止';
+      if (!$('progressBox').classList.contains('hidden')) $('progressText').textContent += ' 停止';
       break;
     case 0x86: setLamps(b[1]); break;
     case 0x87: setJiggler(b[1] === 1, r16(2)); break;
@@ -424,17 +420,64 @@ function onNotify(b) {
   refreshButtons();
 }
 
-// ===== 本文の送信 =====
-async function sendText() {
-  const r = countWarn();
-  const text = $('text').value;
-  if (!text || r.over) return;
+// ===== 打った文字をそのままPCへ送る =====
+// 安全のため、いまは「ローマ字モード（0x10 のモード=1）」で送る。
+// （Alt＋16進の方式は、働かないアプリでメニューを勝手に開くことが分かったので使わない）
+const SEND_MODE = 1;
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+let chain = Promise.resolve();
+
+function enqueue(job) {
+  const ep = st.epoch;
+  chain = chain.then(() => (ep === st.epoch ? job() : null)).catch(e => log('送信を中断: ' + e.message));
+  return chain;
+}
+
+// ドングルが打ち終わるまで待つ（ドングルは入力中に次の命令を受け付けない）
+function waitIdle() {
+  return new Promise(res => {
+    const t = () => ((!st.typing || (!st.connected && !st.demo)) ? res() : setTimeout(t, 50));
+    t();
+  });
+}
+
+// 入力欄の変化を調べて、増えた文字を送り、減った文字の数だけBSを送る
+function liveSync() {
+  const cur = $('text').value;
+  const ready = (st.connected && st.authed) || st.demo;
+  if (!ready) return;   // 接続前に打った分は、接続したときに「送信済み」とみなす
+  const a = [...st.synced], b = [...cur];
+  let p = 0;
+  while (p < a.length && p < b.length && a[p] === b[p]) p++;
+  const del = a.length - p, add = b.slice(p).join('');
+  st.synced = cur;
+  if (!del && !add) return;
+  enqueue(async () => {
+    await waitIdle();
+    if (del) await sendBackspaces(del);
+    if (add) await sendString(add);
+  });
+}
+
+async function sendBackspaces(n) {
+  st.stopRequested = false;
+  for (let i = 0; i < n; i++) {
+    if (st.stopRequested) return;
+    await writeRaw(Uint8Array.from([0x20, KEY_CODES.bs, LAYOUT[st.layout]]));
+    await sleep(60);   // ドングルが1つずつ処理できる間隔
+  }
+}
+
+async function sendString(text) {
+  const bytes = enc.encode(text);
+  const chars = [...text].length;
+  const big = chars > 20;
+  if (bytes.length > MAX_BYTES) { alert('一度に送れる量を超えています。分けて貼り付けてください。'); return; }
   st.sending = true; st.stopRequested = false;
   refreshButtons();
-  const bytes = enc.encode(text);
-  showProgress(0, r.chars);
+  if (big) showProgress(0, chars);
   try {
-    await writeRaw(concat([0x10, 0, LAYOUT[st.layout], SPEED[st.speed]], u32(bytes.length)));
+    await writeRaw(concat([0x10, SEND_MODE, LAYOUT[st.layout], SPEED[st.speed]], u32(bytes.length)));
     let seq = 0;
     for (let i = 0; i < bytes.length; i += CHUNK) {
       if (st.stopRequested) throw new Error('停止しました');
@@ -443,13 +486,13 @@ async function sendText() {
       await writeRaw(concat([0x11], u16(seq), part));
       await ack;
       seq = (seq + 1) & 0xffff;
-      $('progressText').textContent = `ドングルへ転送中 ${Math.round((i + part.length) / bytes.length * 100)}%`;
+      if (big) $('progressText').textContent = `ドングルへ転送中 ${Math.round((i + part.length) / bytes.length * 100)}%`;
     }
-    await writeRaw(Uint8Array.from([0x12]));
     st.typing = true;
-    log(`送信しました（${r.chars}文字・${bytes.length}バイト）`);
-    if ($('clearAfter').checked) { $('text').value = ''; updateCounter(); }
+    await writeRaw(Uint8Array.from([0x12]));
+    log(`送信しました（${chars}文字）`);
   } catch (e) {
+    st.typing = false;
     log('送信を中断: ' + e.message);
     if (!st.stopRequested) alert('送信できませんでした：' + e.message);
   } finally {
@@ -459,8 +502,15 @@ async function sendText() {
 }
 
 async function stopTyping() {
+  st.epoch++;               // 順番待ちの送信を取り消す
   st.stopRequested = true;
   try { await writeRaw(Uint8Array.from([0x13])); } catch (e) { log('停止の送信に失敗: ' + e.message); }
+}
+
+function clearInput() {
+  $('text').value = '';
+  st.synced = '';
+  updateCounter();
 }
 
 async function sendKey(name) {
@@ -533,7 +583,6 @@ function init() {
   st.layout = load('layout', 'jis');
   const jig = load('jig', 60);
   $('jigInterval').value = jig; $('jigVal').textContent = jig;
-  $('clearAfter').checked = load('clear', true);
   selectSeg($('speedSeg'), 'speed', st.speed);
   selectSeg($('layoutSeg'), 'layout', st.layout);
 
@@ -541,11 +590,14 @@ function init() {
   $('btnDisconnect').onclick = disconnect;
   $('btnDisc2').onclick = disconnect;
   $('btnDemo').onclick = toggleDemo;
-  $('btnSend').onclick = sendText;
+  $('btnClear').onclick = clearInput;
   $('btnStop').onclick = stopTyping;
-  $('text').addEventListener('input', updateCounter);
+  // 変換の途中（下線のある間）は送らず、確定したときに送る
+  let composing = false;
+  $('text').addEventListener('compositionstart', () => { composing = true; });
+  $('text').addEventListener('compositionend', () => { composing = false; setTimeout(liveSync, 0); });
+  $('text').addEventListener('input', (e) => { updateCounter(); if (!composing && !e.isComposing) liveSync(); });
   $('rememberPass').onchange = (e) => { if (!e.target.checked) save('pass', ''); };
-  $('clearAfter').onchange = (e) => save('clear', e.target.checked);
 
 
   $('speedSeg').querySelectorAll('button').forEach(b => b.onclick = () => { st.speed = b.dataset.speed; save('speed', st.speed); selectSeg($('speedSeg'), 'speed', st.speed); });
