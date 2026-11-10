@@ -35,6 +35,7 @@
 #define PASSPHRASE   "change-me"     // 合言葉（19バイトまで。スマホで入れるものと同じにする）
 #define DEVICE_NAME  "PhoneKB"       // スマホの接続画面に出る名前
 #define AUTO_IME     true            // 英数字の前後で IME を自動で切り替える（PCのIMEは普段「あ」のままでOK）
+#define TEST_SERIAL  true            // USBシリアルからの打鍵試験を受け付ける（PC側のClaude Codeの自動試験用）
 // ================================================================
 
 // ===== 固定UUID（web/index.html と同じ値） =====
@@ -68,6 +69,7 @@
 #define K_MUHENKAN  0x8B          // 無変換（IME OFF に割り当てる）
 #define K_YEN       0x89          // JIS「￥」キー（\ と |）
 #define K_HANKAKU   0x35          // JIS では 半角/全角
+#define K_F10       0x43          // IME の合成中は「半角英数に変換」
 #define MOD_LSHIFT  0xE1
 #define MOD_LALT    0xE2
 
@@ -91,6 +93,7 @@ uint8_t  layout = 0;             // 0=JIS 1=US
 uint8_t  speed = 1;              // 0=ゆっくり 1=ふつう 2=速い
 volatile bool startTyping = false;   // BLE側から「打ち始めて」の合図
 volatile bool typing = false;
+bool testRun = false;               // USBシリアルからの試験打鍵か（BLE未接続でも打つ）
 volatile bool stopRequested = false;
 
 // 速度ごとの待ち時間（ミリ秒）: キーを押している時間 / 次のキーまで
@@ -100,6 +103,9 @@ const uint8_t GAP_MS[3]  = { 20, 8, 3 };
 // ===== ロック状態（PCから届く）=====
 volatile uint8_t lockBits = 0;   // bit0=Num bit1=Caps bit2=Scroll
 volatile bool lockChanged = false;
+
+// IME の扱い: 0=何もしない 1=無変換(OFF)/変換(ON)キーで切り替え 2=F10(半角英数変換)で確定
+uint8_t imeMode = AUTO_IME ? 1 : 0;
 
 // ===== ジグラー =====
 // スマホがつながっていなくても動く。差した直後から ON（本体ボタンかスマホで OFF にできる）
@@ -265,7 +271,7 @@ void typeAll() {
   uint16_t done = 0;
   uint32_t lastNotify = 0;
   pendingKana = 0;
-  Serial.printf("[打鍵] 開始 %u文字 モード=%u 配列=%u 速度=%u\n", total, typeMode, layout, speed);
+  Serial.printf("[打鍵] 開始 %u文字 モード=%u 配列=%u 速度=%u ime=%u ロック=%u\n", total, typeMode, layout, speed, imeMode, (unsigned)lockBits);
 
   // Unicode モードでは NumLock が ON でないとテンキーの数字が打てない
   bool numWasOff = false;
@@ -275,19 +281,21 @@ void typeAll() {
     delay(50);
   }
 
-  bool inAscii = false;   // いま IME OFF にして英数字を打っている途中か
+  bool inAscii = false;   // imeMode=1: いま IME OFF にして英数字を打っている途中か
+  bool asciiRun = false;  // imeMode=2: いま英数字の連続を打っている途中か
+  // imeMode=2: 英数字の連続のあとで、F10 で半角英数にして Enter で確定する
+  auto flushAscii = [&]() {
+    if (asciiRun) { tapRaw(K_F10); tapRaw(K_ENTER); asciiRun = false; }
+  };
   uint32_t i = 0;
   while (i < textLen) {
-    if (stopRequested || !bleConnected) break;
+    if (stopRequested || (!bleConnected && !testRun)) break;
     uint32_t cp = nextCodepoint(i);
     if (cp == '\r') { done++; continue; }
 
     if (typeMode == 0) {
-      // ----- Unicode16進モード -----
-      // PCのIMEは普段「あ（日本語）」のままでよい。
-      //  ・日本語の文字は Unicode16進で打つので、IMEの状態に関係なく入る
-      //  ・英数字・記号の連続の前では「無変換（IME OFF）」、後では「変換（IME ON）」を自動で押す
-      if (AUTO_IME) {
+      // ----- Unicode16進モード（Alt＋テンキー。Word・メモ帳では働かないことが分かっている）-----
+      if (imeMode == 1) {
         if (cp < 0x80 && !inAscii) { tapRaw(K_MUHENKAN); delay(30); inAscii = true; }
         else if (cp >= 0x80 && inAscii) { tapRaw(K_HENKAN); delay(30); inAscii = false; }
       }
@@ -299,29 +307,38 @@ void typeAll() {
         Serial.printf("[打鍵] 絵文字など(U+%X)は飛ばします\n", (unsigned)cp);
       }
     } else {
-      // ----- ローマ字モード -----
+      // ----- ローマ字モード（IME ON のまま、かなをローマ字で打つ。漢字は打てない）-----
       const char* r = (cp <= 0xFFFF) ? kanaToRomaji((uint16_t)cp) : nullptr;
       if (r) {
+        flushAscii();
         for (const char* p = r; *p; p++) typeAscii(*p);
         pendingKana++;
         // 句読点のあと、または30文字ごとに確定
         if (cp == 0x3001 || cp == 0x3002 || pendingKana >= 30) confirmKana();
       } else if (cp == '\n') {
+        flushAscii();
         confirmKana();
         tapRaw(K_ENTER);
       } else if (cp < 0x80) {
-        typeAscii((char)cp);
-        pendingKana++;
+        if (imeMode == 2) {
+          if (!asciiRun) { confirmKana(); asciiRun = true; }
+          typeAscii((char)cp);
+        } else {
+          if (imeMode == 1 && !inAscii) { confirmKana(); tapRaw(K_MUHENKAN); delay(30); inAscii = true; }
+          typeAscii((char)cp);
+          if (imeMode != 1) pendingKana++;
+        }
       } else {
         Serial.printf("[打鍵] ローマ字にできない文字(U+%X)は飛ばします\n", (unsigned)cp);
       }
+      if (cp >= 0x80 && inAscii) { tapRaw(K_HENKAN); delay(30); inAscii = false; }
     }
 
     done++;
     if (millis() - lastNotify > 200) { notifyProgress(done, total); lastNotify = millis(); }
   }
-  if (typeMode == 1) confirmKana();
-  if (typeMode == 0 && AUTO_IME && inAscii) { tapRaw(K_HENKAN); delay(30); }   // IME を日本語入力に戻す
+  if (typeMode == 1) { flushAscii(); confirmKana(); }
+  if (imeMode == 1 && inAscii) { tapRaw(K_HENKAN); delay(30); }   // IME を日本語入力に戻す
   if (numWasOff) tapRaw(K_NUMLOCK);   // NumLock を元に戻す
   Keyboard.releaseAll();
 
@@ -338,6 +355,54 @@ void typeAll() {
   }
   stopRequested = false;
 }
+
+
+// =====================================================================
+//  試験用: USBシリアル(CDC)から打鍵を起動する（TEST_SERIAL が true のとき）
+//  PC側のClaude Codeが、スマホ無しで自動試験をするために使う。
+//   送る行: @T <モード> <配列> <速度> <ime> <base64(UTF-8)>\n
+//     モード 0=Unicode16進 1=ローマ字 / 配列 0=JIS 1=US / 速度 0〜2 / ime 0〜2
+//   返す行: @TOK（受付）/ @TNG <理由> / @TDONE（打ち終わり）
+// =====================================================================
+#if TEST_SERIAL
+int b64val(char c) {
+  if (c >= 'A' && c <= 'Z') return c - 'A';
+  if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+  if (c >= '0' && c <= '9') return c - '0' + 52;
+  if (c == '+') return 62;
+  if (c == '/') return 63;
+  return -1;
+}
+size_t b64decode(const char* in, uint8_t* out, size_t cap) {
+  size_t n = 0; uint32_t acc = 0; int bits = 0;
+  for (; *in; in++) {
+    int v = b64val(*in);
+    if (v < 0) continue;
+    acc = (acc << 6) | v; bits += 6;
+    if (bits >= 8) { bits -= 8; if (n >= cap) return n; out[n++] = (acc >> bits) & 0xFF; }
+  }
+  return n;
+}
+String testLine;
+void handleTestLine(const String& line) {
+  if (!line.startsWith("@T ")) return;
+  if (typing || startTyping) { Serial.println("@TNG busy"); return; }
+  int m, l, sp, ime;
+  int consumed = 0;
+  if (sscanf(line.c_str() + 3, "%d %d %d %d %n", &m, &l, &sp, &ime, &consumed) < 4 || consumed == 0) { Serial.println("@TNG format"); return; }
+  typeMode = m ? 1 : 0; layout = l ? 1 : 0; speed = sp > 2 ? 1 : sp; imeMode = ime > 2 ? 1 : ime;
+  textLen = b64decode(line.c_str() + 3 + consumed, textBuf, MAX_BYTES);
+  testRun = true; startTyping = true;
+  Serial.printf("@TOK %u\n", (unsigned)textLen);
+}
+void pollSerialTest() {
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == '\n') { handleTestLine(testLine); testLine = ""; }
+    else if (c != '\r' && testLine.length() < 46000) testLine += c;
+  }
+}
+#endif
 
 // =====================================================================
 //  キー1つの命令
@@ -510,10 +575,14 @@ void loop() {
   static bool btnPrev = false;
 
   // ----- 打ち込み -----
+#if TEST_SERIAL
+  pollSerialTest();
+#endif
   if (startTyping) {
     startTyping = false;
     led(0, 0, 40);
     typeAll();
+    if (testRun) { testRun = false; Serial.println("@TDONE"); }
   }
 
   // ----- キー1つ -----
