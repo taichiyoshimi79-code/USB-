@@ -117,15 +117,6 @@
   <details>
     <summary>設定</summary>
     <div style="margin-top:10px">
-      <label>入力速度</label>
-      <div class="seg" id="speedSeg">
-        <button data-speed="slow">ゆっくり</button>
-        <button data-speed="normal" class="sel">ふつう</button>
-        <button data-speed="fast">速い</button>
-      </div>
-      <p class="note">文字が抜ける・化ける時は「ゆっくり」にしてください。</p>
-    </div>
-    <div style="margin-top:10px">
       <label>PCのキーボード配列（英数字・記号用）</label>
       <div class="seg" id="layoutSeg">
         <button data-layout="jis" class="sel">日本語（JIS）</button>
@@ -191,13 +182,14 @@ const ACK_TIMEOUT_MS = 3000;
 
 const KEY_CODES = { enter:1, bs:2, tab:3, ime_on:4, ime_off:5, hankaku:6,
   numlock:7, capslock:8, insert:9, esc:10, del:11, space:12 };
-const SPEED = { slow:0, normal:1, fast:2 };
+// 入力速度は固定（0=ゆっくり 1=ふつう 2=速い）。試験の結果で決めた値にする。
+const TYPE_SPEED = 1;
 const LAYOUT = { jis:0, us:1 };
 
 // ===== 状態 =====
 const st = {
   device: null, writeChar: null, connected: false, authed: false, demo: false,
-  mode: 'A', speed: 'normal', layout: 'jis',
+  layout: 'jis',
   sending: false, typing: false, stopRequested: false, synced: '', epoch: 0,
   jigOn: false, jigInterval: 60,
   ackWaiters: new Map(), userDisconnect: false, reconnectTries: 0,
@@ -477,7 +469,7 @@ async function sendString(text) {
   refreshButtons();
   if (big) showProgress(0, chars);
   try {
-    await writeRaw(concat([0x10, SEND_MODE, LAYOUT[st.layout], SPEED[st.speed]], u32(bytes.length)));
+    await writeRaw(concat([0x10, SEND_MODE, LAYOUT[st.layout], TYPE_SPEED], u32(bytes.length)));
     let seq = 0;
     for (let i = 0; i < bytes.length; i += CHUNK) {
       if (st.stopRequested) throw new Error('停止しました');
@@ -548,7 +540,7 @@ function demoReceive(b) {
 
 function demoStartTyping() {
   const chars = [...dec.decode(Uint8Array.from(demo.buf))];
-  const delay = { slow: 120, normal: 60, fast: 30 }[st.speed];
+  const delay = 60;
   let i = 0;
   demoStopTyping();
   log('（デモ）PCに打つ文字: ' + chars.join('').slice(0, 60) + (chars.length > 60 ? '…' : ''));
@@ -579,11 +571,9 @@ function init() {
   // 保存してある設定を戻す
   const savedPass = load('pass', '');
   if (savedPass) { $('pass').value = savedPass; $('rememberPass').checked = true; }
-  st.speed = load('speed', 'normal');
   st.layout = load('layout', 'jis');
   const jig = load('jig', 60);
   $('jigInterval').value = jig; $('jigVal').textContent = jig;
-  selectSeg($('speedSeg'), 'speed', st.speed);
   selectSeg($('layoutSeg'), 'layout', st.layout);
 
   $('btnConnect').onclick = connect;
@@ -600,7 +590,6 @@ function init() {
   $('rememberPass').onchange = (e) => { if (!e.target.checked) save('pass', ''); };
 
 
-  $('speedSeg').querySelectorAll('button').forEach(b => b.onclick = () => { st.speed = b.dataset.speed; save('speed', st.speed); selectSeg($('speedSeg'), 'speed', st.speed); });
   $('layoutSeg').querySelectorAll('button').forEach(b => b.onclick = () => { st.layout = b.dataset.layout; save('layout', st.layout); selectSeg($('layoutSeg'), 'layout', st.layout); });
 
   document.querySelectorAll('[data-key]').forEach(b => b.onclick = () => sendKey(b.dataset.key));
