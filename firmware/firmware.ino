@@ -105,6 +105,11 @@ const uint8_t GAP_MS[3]  = { 20, 8, 3 };
 volatile uint8_t lockBits = 0;   // bit0=Num bit1=Caps bit2=Scroll
 volatile bool lockChanged = false;
 
+// 打ち始める前に押す「IME を日本語入力にする」キー（HID の使用コード。0=押さない）。
+// IME が「A」でも「あ」でも、押せば必ず「あ」になるキーが見つかったら、その値にする。
+// （候補: 0x88=ひらがな/カタカナ 0x90=Lang1 0x8A=変換）値は試験用シリアルの @I で変えられる。
+uint8_t imeOnKey = 0;
+
 // IME の扱い: 0=何もしない 1=無変換(OFF)/変換(ON)キーで切り替え 2=F10(半角英数変換)で確定
 uint8_t imeMode = AUTO_IME ? 2 : 0;  // 既定は2(F10確定)。このPCでは無変換でIMEがOFFにならないため
 
@@ -322,6 +327,9 @@ void typeAll() {
     delay(50);
   }
 
+  // 打ち始める前に、IME を日本語入力（あ）にする（ローマ字モードのときだけ）
+  if (typeMode == 1 && imeOnKey) { tapRaw(imeOnKey); delay(150); }
+
   bool inAscii = false;   // imeMode=1: いま IME OFF にして英数字を打っている途中か
   bool asciiRun = false;  // imeMode=2: いま英数字の連続を打っている途中か
   // imeMode=2: 英数字の連続のあとで、F10 で半角英数にして Enter で確定する
@@ -442,6 +450,18 @@ void handleTestLine(const String& line) {
   if (line == "@S") {   // 停止（BLE の 0x13 と同じ）
     stopRequested = true;
     Serial.println(typing ? "@SOK typing" : "@SOK idle");
+    return;
+  }
+  if (line.startsWith("@I ")) {   // IME ON キーの使用コード(16進)を設定: @I 88（0で押さない）
+    imeOnKey = (uint8_t)strtol(line.c_str() + 3, nullptr, 16);
+    Serial.printf("@IOK %02X\n", imeOnKey);
+    return;
+  }
+  if (line.startsWith("@R ")) {   // キー1つを使用コード(16進)で押す: @R 88（試験用）
+    if (typing) { Serial.println("@RNG busy"); return; }
+    uint8_t k = (uint8_t)strtol(line.c_str() + 3, nullptr, 16);
+    if (k) tapRaw(k);
+    Serial.printf("@ROK %02X\n", k);
     return;
   }
   if (line.startsWith("@P ")) {   // コード入力の間隔を変える: @P キー間隔 F5後 先頭 末尾 休む文字数 休む長さ（ms）
