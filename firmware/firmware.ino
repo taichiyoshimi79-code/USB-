@@ -120,6 +120,7 @@ uint8_t imeMode = AUTO_IME ? 2 : 0;  // 既定は2(F10確定)。このPCでは�
 bool     jigOn = JIG_ON_AT_BOOT;
 uint16_t jigSec = 60;
 uint32_t jigLast = 0;
+uint32_t jigWaitMs = 60000;   // 次にF15を押すまでの待ち。毎回、設定した間隔の70〜130%でばらつかせる
 
 // ===== キー操作命令（BLE側で受けて loop で実行）=====
 volatile int pendingKey = -1;
@@ -600,7 +601,7 @@ class WriteCB : public NimBLECharacteristicCallbacks {
           jigOn = b[1] == 1;
           uint16_t s = b[2] | (b[3] << 8);
           jigSec = constrain(s, 30, 300);
-          jigLast = millis();
+          jigLast = millis(); jigWaitMs = (uint32_t)jigSec * 1000;
           notifyJig();
           Serial.printf("[ジグラー] %s %u秒\n", jigOn ? "ON" : "OFF", jigSec);
         }
@@ -733,10 +734,11 @@ void loop() {
   btnPrev = btn;
 
   // ----- ジグラー: 決めた間隔で F15 を押す（打ち込み中は休む）-----
-  if (jigOn && !typing && millis() - jigLast >= (uint32_t)jigSec * 1000) {
+  if (jigOn && !typing && millis() - jigLast >= jigWaitMs) {
     jigLast = millis();
+    jigWaitMs = (uint32_t)jigSec * 10 * (70 + random(61));   // 設定した秒数の70〜130%
     tapRaw(K_F15);
-    Serial.println("[ジグラー] F15");
+    Serial.printf("[ジグラー] F15 次は%u秒後\n", (unsigned)(jigWaitMs / 1000));
   }
 
   // ----- LED: ジグラーONなら緑点滅、接続中は青、待機中は暗い青 -----
