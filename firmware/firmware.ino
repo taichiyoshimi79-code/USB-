@@ -30,6 +30,7 @@
 #include "USB.h"
 #include "USBHIDKeyboard.h"
 #include <NimBLEDevice.h>
+#include <Preferences.h>   // パスワード・PINをドングル内（NVS）に保存する
 
 // ===================== ここは自分用に変える =====================
 #define PASSPHRASE   "change-me"     // 合言葉（19バイトまで。スマホで入れるものと同じにする）
@@ -410,6 +411,7 @@ void typeAll() {
   if (typeMode == 1) { flushAscii(); confirmKana(); }
   if (imeMode == 1 && inAscii) { tapRaw(K_HENKAN); delay(30); }   // IME を日本語入力に戻す
   if (numWasOff) tapRaw(K_NUMLOCK);   // NumLock を元に戻す
+  if (typeMode == 2) memset(textBuf, 0, 48);   // パスワード・PINを、メモリから消す
   Keyboard.releaseAll();
 
   typing = false;
@@ -491,7 +493,7 @@ void handleTestLine(const String& line) {
   int m, l, sp, ime;
   int consumed = 0;
   if (sscanf(line.c_str() + 3, "%d %d %d %d %n", &m, &l, &sp, &ime, &consumed) < 4 || consumed == 0) { Serial.println("@TNG format"); return; }
-  typeMode = m ? 1 : 0; layout = l ? 1 : 0; speed = sp > 2 ? 1 : sp; imeMode = ime > 2 ? 1 : ime;
+  typeMode = m >= 2 ? 2 : (m ? 1 : 0); layout = l ? 1 : 0; speed = sp > 2 ? 1 : sp; imeMode = ime > 2 ? 1 : ime;
   textLen = b64decode(line.c_str() + 3 + consumed, textBuf, MAX_BYTES);
   testRun = true; startTyping = true;
   Serial.printf("@TOK %u\n", (unsigned)textLen);
@@ -603,6 +605,31 @@ class WriteCB : public NimBLECharacteristicCallbacks {
           Serial.printf("[ジグラー] %s %u秒\n", jigOn ? "ON" : "OFF", jigSec);
         }
         break;
+
+      case 0x50: { // パスワード/PINを登録（slot 0=Windowsパスワード 1=BitLocker PIN。空なら消す）。値は読み出せない
+        if (typing || n < 2 || b[1] > 1 || n - 2 > 40) { notifyErr(2); return; }
+        char key[3] = { 's', (char)('0' + b[1]), 0 };
+        Preferences pr; pr.begin("kbsec", false);
+        if (n > 2) pr.putBytes(key, b + 2, n - 2); else pr.remove(key);
+        pr.end();
+        uint8_t r[3] = { 0x89, b[1], (uint8_t)(n > 2 ? 1 : 0) };
+        notify(r, 3);
+        break;
+      }
+
+      case 0x51: { // 登録済みを打つ [slot][enter 0/1][layout]。IMEを通さず生キーで打つ
+        if (typing || startTyping || receiving) { notifyErr(2); return; }
+        if (n < 4 || b[1] > 1) return;
+        char key[3] = { 's', (char)('0' + b[1]), 0 };
+        Preferences pr; pr.begin("kbsec", true);
+        size_t len = pr.getBytes(key, textBuf, 40);
+        pr.end();
+        if (len == 0) { uint8_t r[3] = { 0x89, b[1], 0 }; notify(r, 3); return; }
+        if (b[2]) textBuf[len++] = '\n';
+        textLen = len; typeMode = 2; layout = b[3]; speed = 0;
+        startTyping = true;
+        break;
+      }
 
       case 0x40:   // 状態問い合わせ
         notifyLocks();
