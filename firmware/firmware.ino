@@ -33,7 +33,7 @@
 
 // ===================== ここは自分用に変える =====================
 #define PASSPHRASE   "change-me"     // 合言葉（19バイトまで。スマホで入れるものと同じにする）
-#define DEVICE_NAME  "PhoneKB"       // スマホの接続画面に出る名前
+#define DEVICE_NAME  "YOSHI-KB"       // スマホの接続画面に出る名前
 #define AUTO_IME     true            // 英数字の前後で IME を自動で切り替える（PCのIMEは普段「あ」のままでOK）
 #define TEST_SERIAL  true            // USBシリアルからの打鍵試験を受け付ける（PC側のClaude Codeの自動試験用）
 // ================================================================
