@@ -62,6 +62,13 @@
   details summary { font-weight: 700; cursor: pointer; padding: 4px 0; }
   .hidden { display: none !important; }
   .banner { background: var(--warn); color: #fff; border-radius: 10px; padding: 8px 12px; font-weight: 700; margin-bottom: 10px; }
+  html, body { height: 100%; }
+  body { display: flex; flex-direction: column; height: 100dvh; overflow-y: auto; padding-bottom: 8px; }
+  h1 { font-size: 18px; margin: 0 0 6px; }
+  .card { margin-bottom: 8px; padding: 10px; }
+  #inputCard { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  #inputCard textarea { flex: 1; min-height: 60px; resize: none; }
+  #inputCard .counter, #inputCard .note { margin-top: 2px; }
 </style>
 </head>
 <body>
@@ -95,22 +102,18 @@
 </div>
 
 <!-- ===== 入力・送信 ===== -->
-<div class="card">
+<div class="card" id="inputCard">
   <textarea id="text" placeholder="ここに入力して「送信」を押すと、PCに入ります（フリック・音声入力・貼り付けOK）"></textarea>
   <div id="counter" class="counter">0 / 10000文字</div>
   <div id="warnBox" class="note" style="color:var(--warn)"></div>
 
 
-  <div class="row" style="margin-top:10px">
-    <button id="btnSend" class="primary grow" disabled>送信（PCに入力）</button>
-  </div>
-  <div class="grid2" style="margin-top:10px">
-    <button id="btnPcBs">⌫ PCの1文字を消す<br><small>（長押しで連続）</small></button>
-    <button id="btnStop" class="danger" disabled>停止</button>
-  </div>
   <div class="row" style="margin-top:8px">
-    <button id="btnClear" class="grow">入力欄をクリア（PCには送りません）</button>
+    <button id="btnSend" class="primary grow" disabled>送信</button>
+    <button id="btnPcBs" style="min-width:64px" title="PCの1文字を消す（長押しで連続）">⌫</button>
+    <button id="btnStop" class="danger" disabled style="min-width:64px">停止</button>
   </div>
+  <div class="note" style="margin-top:4px">⌫＝PCの文字を1文字消す（長押しで連続）</div>
 
   <div id="progressBox" class="hidden" style="margin-top:10px">
     <progress id="progress" value="0" max="1"></progress>
@@ -606,7 +609,6 @@ function init() {
   $('btnDisconnect').onclick = disconnect;
   $('btnDisc2').onclick = disconnect;
   $('btnDemo').onclick = toggleDemo;
-  $('btnClear').onclick = clearInput;
   $('btnStop').onclick = stopTyping;
   $('text').addEventListener('compositionstart', () => { composingNow = true; });
   $('text').addEventListener('compositionend', () => { composingNow = false; refreshButtons(); });
