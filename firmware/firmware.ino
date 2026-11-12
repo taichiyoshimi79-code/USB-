@@ -89,7 +89,7 @@ uint16_t nextSeq = 0;
 bool     receiving = false;
 
 // ===== 打ち込みの設定と状態 =====
-uint8_t  typeMode = 0;           // 0=Unicode16進 1=ローマ字
+uint8_t  typeMode = 0;           // 0=Unicode16進 1=ローマ字 2=生キー(パスワード・PIN用)
 uint8_t  layout = 0;             // 0=JIS 1=US
 uint8_t  speed = 1;              // 0=ゆっくり 1=ふつう 2=速い
 volatile bool startTyping = false;   // BLE側から「打ち始めて」の合図
@@ -344,6 +344,14 @@ void typeAll() {
     if (stopRequested || (!bleConnected && !testRun)) break;
     uint32_t cp = nextCodepoint(i);
     if (cp == '\r') { done++; continue; }
+
+    if (typeMode == 2) {
+      // ----- 生キーモード（パスワード・BitLocker PIN用）: IMEキーもF10も使わず、英数字をそのまま打つ -----
+      if (cp == '\n') tapRaw(K_ENTER);
+      else if (cp < 0x80) typeAscii((char)cp);
+      done++;
+      continue;
+    }
 
     if (typeMode == 0) {
       // ----- Unicode16進モード（Alt＋テンキー。Word・メモ帳では働かないことが分かっている）-----

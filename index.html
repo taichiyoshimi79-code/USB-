@@ -66,7 +66,8 @@
   body { display: flex; flex-direction: column; height: 100dvh; overflow-y: auto; padding-bottom: 8px; }
   h1 { font-size: 18px; margin: 0 0 6px; }
   .card { margin-bottom: 8px; padding: 10px; }
-  #inputCard { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .card, h1, .banner { flex-shrink: 0; }
+  #inputCard { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 210px; }
   #inputCard textarea { flex: 1; min-height: 60px; resize: none; }
   #inputCard .counter, #inputCard .note { margin-top: 2px; }
 </style>
@@ -113,7 +114,11 @@
     <button id="btnPcBs" style="min-width:64px" title="PCの1文字を消す（長押しで連続）">⌫</button>
     <button id="btnStop" class="danger" disabled style="min-width:64px">停止</button>
   </div>
-  <div class="note" style="margin-top:4px">⌫＝PCの文字を1文字消す（長押しで連続）</div>
+  <div class="row" style="margin-top:8px">
+    <button id="btnPw" class="grow">🔑 Windowsパスワード</button>
+    <button id="btnPin" class="grow">🔢 BitLocker PIN</button>
+  </div>
+  <div class="note" style="margin-top:4px">⌫＝PCの1文字を消す（長押しで連続）</div>
 
   <div id="progressBox" class="hidden" style="margin-top:10px">
     <progress id="progress" value="0" max="1"></progress>
@@ -132,6 +137,12 @@
         <button data-layout="us">英語（US）</button>
       </div>
     </div>
+    <div style="border-top:1px solid var(--line); margin-top:14px"></div>
+    <div style="margin-top:12px"><b>パスワード・PINの登録</b><br><span class="note">このスマホの中にだけ保存します（公開ページやGitHubには載りません）。</span></div>
+    <div class="row" style="margin-top:6px"><input id="pwWin" type="password" class="grow" placeholder="Windowsのパスワード" autocomplete="off"></div>
+    <div class="row" style="margin-top:6px"><input id="pwPin" type="password" class="grow" placeholder="BitLockerのPIN" autocomplete="off"></div>
+    <div class="row" style="margin-top:6px"><button id="btnSecSave" class="grow">登録する</button><button id="btnSecDel" class="grow">登録を消す</button></div>
+    <div class="row" style="margin-top:6px"><label><input id="secEnter" type="checkbox" checked> 入力のあとEnterも押す</label></div>
     <div style="border-top:1px solid var(--line); margin-top:14px"></div>
   <div class="row" style="margin-top:14px">
     <span class="grow"><b>スリープ防止</b><br><span class="note">F15キーを定期的に押します（画面には何も入力されません）</span></span>
@@ -232,6 +243,7 @@ function refreshButtons() {
   $('btnStop').disabled = !busy;
   $('btnSend').disabled = !ready || busy || !$('text').value;
   $('btnPcBs').disabled = !ready;
+  $('btnPw').disabled = !ready || busy; $('btnPin').disabled = !ready || busy;
   $('btnConnect').disabled = st.connected || st.demo;
   $('btnDisconnect').disabled = !st.connected && !st.demo;
   document.querySelectorAll('[data-key]').forEach(b => b.disabled = !ready || busy);
@@ -482,7 +494,7 @@ async function sendBackspaces(n) {
   }
 }
 
-async function sendString(text) {
+async function sendString(text, opt = {}) {
   const bytes = enc.encode(text);
   const chars = [...text].length;
   const big = chars > 20;
@@ -491,7 +503,7 @@ async function sendString(text) {
   refreshButtons();
   if (big) showProgress(0, chars);
   try {
-    await writeRaw(concat([0x10, SEND_MODE, LAYOUT[st.layout], TYPE_SPEED], u32(bytes.length)));
+    await writeRaw(concat([0x10, opt.mode ?? SEND_MODE, LAYOUT[st.layout], opt.speed ?? TYPE_SPEED], u32(bytes.length)));
     let seq = 0;
     for (let i = 0; i < bytes.length; i += CHUNK) {
       if (st.stopRequested) throw new Error('停止しました');
@@ -504,7 +516,7 @@ async function sendString(text) {
     }
     st.typing = true;
     await writeRaw(Uint8Array.from([0x12]));
-    log(`送信しました（${chars}文字）`);
+    log(opt.secret ? '送信しました（秘密の文字）' : `送信しました（${chars}文字）`);
     return true;
   } catch (e) {
     st.typing = false;
@@ -515,6 +527,16 @@ async function sendString(text) {
     st.sending = false;
     refreshButtons();
   }
+}
+
+// パスワード／PIN：IMEを通さず、キーをそのまま打つ（モード2）。値はこのスマホの中だけに保存
+async function sendSecret(key) {
+  if (!((st.connected && st.authed) || st.demo)) { alert('先に接続してください'); return; }
+  const v = load(key, '');
+  if (!v) { alert('先に、設定の「パスワード・PINの登録」で登録してください'); return; }
+  const text = v + ($('secEnter').checked ? '\n' : '');
+  demo.secret = true;
+  enqueue(async () => { await waitIdle(); await sendString(text, { mode: 2, speed: 0, secret: true }); demo.secret = false; });
 }
 
 async function stopTyping() {
@@ -572,7 +594,7 @@ function demoStartTyping() {
   const delay = 60;
   let i = 0;
   demoStopTyping();
-  log('（デモ）PCに打つ文字: ' + chars.join('').slice(0, 60) + (chars.length > 60 ? '…' : ''));
+  log(demo.secret ? '（デモ）秘密の文字を打ちました' : '（デモ）PCに打つ文字: ' + chars.join('').slice(0, 60) + (chars.length > 60 ? '…' : ''));
   demo.timer = setInterval(() => {
     i++;
     onNotify(Uint8Array.from([0x83, ...u16(i), ...u16(chars.length)]));
@@ -610,6 +632,17 @@ function init() {
   $('btnDisc2').onclick = disconnect;
   $('btnDemo').onclick = toggleDemo;
   $('btnStop').onclick = stopTyping;
+  $('btnPw').onclick = () => sendSecret('sec_pw');
+  $('btnPin').onclick = () => sendSecret('sec_pin');
+  $('secEnter').checked = load('sec_enter', true);
+  $('secEnter').onchange = (e) => save('sec_enter', e.target.checked);
+  $('btnSecSave').onclick = () => {
+    if ($('pwWin').value) save('sec_pw', $('pwWin').value);
+    if ($('pwPin').value) save('sec_pin', $('pwPin').value);
+    $('pwWin').value = ''; $('pwPin').value = '';
+    alert('登録しました');
+  };
+  $('btnSecDel').onclick = () => { save('sec_pw', ''); save('sec_pin', ''); alert('登録を消しました'); };
   $('text').addEventListener('compositionstart', () => { composingNow = true; });
   $('text').addEventListener('compositionend', () => { composingNow = false; refreshButtons(); });
   $('text').addEventListener('input', () => { updateCounter(); refreshButtons(); });
