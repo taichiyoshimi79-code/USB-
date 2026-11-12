@@ -96,14 +96,20 @@
 
 <!-- ===== 入力・送信 ===== -->
 <div class="card">
-  <textarea id="text" placeholder="ここに入力すると、そのままPCに入ります（フリック・音声入力・貼り付けOK）"></textarea>
+  <textarea id="text" placeholder="ここに入力して「送信」を押すと、PCに入ります（フリック・音声入力・貼り付けOK）"></textarea>
   <div id="counter" class="counter">0 / 10000文字</div>
   <div id="warnBox" class="note" style="color:var(--warn)"></div>
 
 
+  <div class="row" style="margin-top:10px">
+    <button id="btnSend" class="primary grow" disabled>送信（PCに入力）</button>
+  </div>
   <div class="grid2" style="margin-top:10px">
-    <button id="btnClear">入力欄をクリア<br><small>（PCには送りません）</small></button>
+    <button id="btnPcBs">⌫ PCの1文字を消す<br><small>（長押しで連続）</small></button>
     <button id="btnStop" class="danger" disabled>停止</button>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <button id="btnClear" class="grow">入力欄をクリア（PCには送りません）</button>
   </div>
 
   <div id="progressBox" class="hidden" style="margin-top:10px">
@@ -221,6 +227,8 @@ function refreshButtons() {
   const ready = (st.connected && st.authed) || st.demo;
   const busy = st.sending || st.typing;
   $('btnStop').disabled = !busy;
+  $('btnSend').disabled = !ready || busy || !$('text').value;
+  $('btnPcBs').disabled = !ready;
   $('btnConnect').disabled = st.connected || st.demo;
   $('btnDisconnect').disabled = !st.connected && !st.demo;
   document.querySelectorAll('[data-key]').forEach(b => b.disabled = !ready || busy);
@@ -373,7 +381,6 @@ function onNotify(b) {
       if (st.authed) {
         setStatus(st.demo ? 'デモ接続中' : '接続中', 'ok');
         if ($('rememberPass').checked) save('pass', $('pass').value);
-        st.synced = $('text').value;   // 接続前に打った分は送らない
         focusInput();
         writeRaw(Uint8Array.from([0x40])).catch(() => {});
       } else {
@@ -434,27 +441,33 @@ function waitIdle() {
   });
 }
 
-// 入力欄の変化を調べて、増えた文字を送り、減った文字の数だけBSを送る
-function liveSync() {
-  const cur = $('text').value;
-  const ready = (st.connected && st.authed) || st.demo;
-  if (!ready) return;   // 接続前に打った分は、接続したときに「送信済み」とみなす
-  const a = [...st.synced], b = [...cur];
-  let p = 0;
-  while (p < a.length && p < b.length && a[p] === b[p]) p++;
-  const del = a.length - p, add = b.slice(p).join('');
-  st.synced = cur;
-  if (!del && !add) return;
+// 「送信」ボタン：入力欄の全文をPCへ送る。成功したら入力欄を空にする（失敗したら残す）
+let composingNow = false;
+function sendAll() {
+  if (!((st.connected && st.authed) || st.demo)) { alert('先に接続してください'); return; }
+  const text = $('text').value;
+  if (!text) return;
+  $('btnSend').disabled = true;
   enqueue(async () => {
     await waitIdle();
-    if (del) await sendBackspaces(del);
+    const cs = [...text];
     // ドングルの受け取り上限を超えないよう、大きな貼り付けは8000文字ずつに分けて順に送る
-    const cs = [...add];
     for (let i = 0; i < cs.length; i += 8000) {
       await waitIdle();
-      await sendString(cs.slice(i, i + 8000).join(''));
+      if (!(await sendString(cs.slice(i, i + 8000).join('')))) { refreshButtons(); return; }
     }
+    await waitIdle();   // 打ち終わるまで待ってから消す
+    // 送っている間に入力欄へ足された分は残す
+    const now = $('text').value;
+    $('text').value = now.startsWith(text) ? now.slice(text.length) : now;
+    updateCounter(); refreshButtons();
   });
+}
+
+// PC側のカーソルの前の1文字を消す（BSキー）
+function pcBackspace() {
+  if (!((st.connected && st.authed) || st.demo)) return;
+  enqueue(async () => { await waitIdle(); await sendBackspaces(1); });
 }
 
 async function sendBackspaces(n) {
@@ -470,7 +483,7 @@ async function sendString(text) {
   const bytes = enc.encode(text);
   const chars = [...text].length;
   const big = chars > 20;
-  if (bytes.length > MAX_BYTES) { alert('一度に送れる量を超えています。分けて貼り付けてください。'); return; }
+  if (bytes.length > MAX_BYTES) { alert('一度に送れる量を超えています。分けて貼り付けてください。'); return false; }
   st.sending = true; st.stopRequested = false;
   refreshButtons();
   if (big) showProgress(0, chars);
@@ -489,10 +502,12 @@ async function sendString(text) {
     st.typing = true;
     await writeRaw(Uint8Array.from([0x12]));
     log(`送信しました（${chars}文字）`);
+    return true;
   } catch (e) {
     st.typing = false;
     log('送信を中断: ' + e.message);
-    if (!st.stopRequested) alert('送信できませんでした：' + e.message);
+    if (!st.stopRequested) alert('送信できませんでした（入力欄の文字は残してあります）：' + e.message);
+    return false;
   } finally {
     st.sending = false;
     refreshButtons();
@@ -512,7 +527,6 @@ function focusInput() {
 
 function clearInput() {
   $('text').value = '';
-  st.synced = '';
   updateCounter();
   focusInput();
 }
@@ -594,11 +608,17 @@ function init() {
   $('btnDemo').onclick = toggleDemo;
   $('btnClear').onclick = clearInput;
   $('btnStop').onclick = stopTyping;
-  // 変換の途中（下線のある間）は送らず、確定したときに送る
-  let composing = false;
-  $('text').addEventListener('compositionstart', () => { composing = true; });
-  $('text').addEventListener('compositionend', () => { composing = false; setTimeout(liveSync, 0); });
-  $('text').addEventListener('input', (e) => { updateCounter(); if (!composing && !e.isComposing) liveSync(); });
+  $('text').addEventListener('compositionstart', () => { composingNow = true; });
+  $('text').addEventListener('compositionend', () => { composingNow = false; refreshButtons(); });
+  $('text').addEventListener('input', () => { updateCounter(); refreshButtons(); });
+  $('btnSend').onclick = () => { if (composingNow) { setTimeout(sendAll, 150); } else sendAll(); };
+  // PCのBS：押すと1文字、長押しで連続
+  (() => {
+    const b = $('btnPcBs'); let t1 = null, t2 = null;
+    const stop = () => { clearTimeout(t1); clearInterval(t2); t1 = t2 = null; };
+    b.addEventListener('pointerdown', (e) => { e.preventDefault(); pcBackspace(); t1 = setTimeout(() => { t2 = setInterval(pcBackspace, 120); }, 500); });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => b.addEventListener(ev, stop));
+  })();
   $('rememberPass').onchange = (e) => { if (!e.target.checked) save('pass', ''); };
 
 
