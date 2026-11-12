@@ -106,9 +106,9 @@ volatile uint8_t lockBits = 0;   // bit0=Num bit1=Caps bit2=Scroll
 volatile bool lockChanged = false;
 
 // 打ち始める前に押す「IME を日本語入力にする」キー（HID の使用コード。0=押さない）。
-// IME が「A」でも「あ」でも、押せば必ず「あ」になるキーが見つかったら、その値にする。
-// （候補: 0x88=ひらがな/カタカナ 0x90=Lang1 0x8A=変換）値は試験用シリアルの @I で変えられる。
-uint8_t imeOnKey = 0;
+// 2026-11-13 自宅PC(MS-IME既定)で試験: 0x90(Lang1)は OFF/あ/半角カナ/全角カタカナ/全角英数 の全状態から「あ」になった(24/24)。
+// 0x88/0x8A/0x8B/0x91 は一部の状態でNG。値は試験用シリアルの @I で変えられる。
+uint8_t imeOnKey = 0x90;
 
 // IME の扱い: 0=何もしない 1=無変換(OFF)/変換(ON)キーで切り替え 2=F10(半角英数変換)で確定
 uint8_t imeMode = AUTO_IME ? 2 : 0;  // 既定は2(F10確定)。このPCでは無変換でIMEがOFFにならないため
