@@ -67,8 +67,8 @@
   h1 { font-size: 18px; margin: 0 0 6px; }
   .card { margin-bottom: 8px; padding: 10px; }
   .card, h1, .banner { flex-shrink: 0; }
-  #inputCard { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 210px; }
-  #inputCard textarea { flex: 1; min-height: 60px; resize: none; }
+  #inputCard { flex: 1 0 auto; display: flex; flex-direction: column; }
+  #inputCard textarea { flex: 1; min-height: 110px; resize: none; }
   #inputCard .counter, #inputCard .note { margin-top: 2px; }
 </style>
 </head>
@@ -115,10 +115,10 @@
     <button id="btnStop" class="danger" disabled style="min-width:64px">停止</button>
   </div>
   <div class="row" style="margin-top:8px">
-    <button id="btnPw" class="grow">🔑 Windowsパスワード</button>
-    <button id="btnPin" class="grow">🔢 BitLocker PIN</button>
+    <button id="btnPw" class="grow" title="Windowsパスワードを入力" aria-label="Windowsパスワードを入力">🔑</button>
+    <button id="btnPin" class="grow" title="BitLocker PINを入力" aria-label="BitLocker PINを入力">🔐</button>
   </div>
-  <div class="note" style="margin-top:4px">⌫＝PCの1文字を消す（長押しで連続）</div>
+  <div class="note" style="margin-top:4px">🔑パスワード　🔐BitLocker PIN　⌫PCの1文字を消す</div>
 
   <div id="progressBox" class="hidden" style="margin-top:10px">
     <progress id="progress" value="0" max="1"></progress>
