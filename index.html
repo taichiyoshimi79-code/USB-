@@ -203,7 +203,7 @@ const ACK_TIMEOUT_MS = 3000;
 const KEY_CODES = { enter:1, bs:2, tab:3, ime_on:4, ime_off:5, hankaku:6,
   numlock:7, capslock:8, insert:9, esc:10, del:11, space:12 };
 // 入力速度は固定（0=ゆっくり 1=ふつう 2=速い）。試験の結果で決めた値にする。
-const TYPE_SPEED = 2;
+const TYPE_SPEED = 1;   // 0=確実 1=ふつう 2=速い。2は取りこぼしが出たので1に戻した
 const LAYOUT = { jis:0, us:1 };
 
 // ===== 状態 =====
